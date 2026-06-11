@@ -1,0 +1,138 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: agent-platform }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: agent-platform, namespace: agent-platform }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: sandbox-manager }
+rules:
+  - apiGroups: [""]
+    resources: [namespaces, pods, resourcequotas]
+    verbs: [get, list, create, delete]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, get]
+  - apiGroups: [node.k8s.io]
+    resources: [runtimeclasses]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: agent-platform-sandbox }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: sandbox-manager }
+subjects:
+  - { kind: ServiceAccount, name: agent-platform, namespace: agent-platform }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api, namespace: agent-platform }
+spec:
+  replicas: 3
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      serviceAccountName: agent-platform
+      containers:
+        - name: api
+          image: agent-platform:latest
+          command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, "8000"]
+          envFrom: [{ secretRef: { name: platform-env } }]
+          env: [{ name: KUBE_IN_CLUSTER, value: "true" }]
+          ports: [{ containerPort: 8000 }]
+          readinessProbe: { httpGet: { path: /healthz, port: 8000 } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: worker, namespace: agent-platform }
+spec:
+  replicas: 5
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata: { labels: { app: worker } }
+    spec:
+      serviceAccountName: agent-platform
+      containers:
+        - name: worker
+          image: agent-platform:latest
+          command: [python, -m, app.execution.worker]
+          envFrom: [{ secretRef: { name: platform-env } }]
+          env:
+            - { name: KUBE_IN_CLUSTER, value: "true" }
+            - { name: WORKER_CONCURRENCY, value: "4" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: scheduler, namespace: agent-platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: scheduler } }
+  template:
+    metadata: { labels: { app: scheduler } }
+    spec:
+      containers:
+        - name: scheduler
+          image: agent-platform:latest
+          command: [python, -m, app.scheduling.scheduler]
+          envFrom: [{ secretRef: { name: platform-env } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: sandbox-reaper, namespace: agent-platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: sandbox-reaper } }
+  template:
+    metadata: { labels: { app: sandbox-reaper } }
+    spec:
+      serviceAccountName: agent-platform
+      containers:
+        - name: reaper
+          image: agent-platform:latest
+          command: [python, -m, app.runtime.sandbox_reaper]
+          envFrom: [{ secretRef: { name: platform-env } }]
+          env: [{ name: KUBE_IN_CLUSTER, value: "true" }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: billing-reporter, namespace: agent-platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: billing-reporter } }
+  template:
+    metadata: { labels: { app: billing-reporter } }
+    spec:
+      containers:
+        - name: reporter
+          image: agent-platform:latest
+          command: [python, -m, app.platform_services.billing_reporter]
+          envFrom: [{ secretRef: { name: platform-env } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: burn-monitor, namespace: agent-platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: burn-monitor } }
+  template:
+    metadata: { labels: { app: burn-monitor } }
+    spec:
+      containers:
+        - name: monitor
+          image: agent-platform:latest
+          command: [python, -m, app.platform_services.burn_monitor]
+          envFrom: [{ secretRef: { name: platform-env } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: agent-platform }
+spec:
+  selector: { app: api }
+  ports: [{ port: 80, targetPort: 8000 }]

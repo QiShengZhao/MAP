@@ -1,0 +1,5 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir boto3 && useradd -m -u 1000 agent
+USER agent
+COPY watcher.py /watcher.py
+CMD ["python", "/watcher.py"]
