@@ -46,6 +46,13 @@ async def run_relay() -> None:
                             f"tenant:{ev['tenant_id']}:run:{ev['run_id']}:events",
                             legacy)
                         pipe.publish(f"run:{ev['run_id']}:notify", data)
+                        if settings.RELAY_MIRROR_JSON:
+                            from app.eventbus.kafka_client import KafkaProducerHolder
+                            producer = await KafkaProducerHolder.get()
+                            await producer.send(
+                                "run-events-json",
+                                value=data.encode(),
+                                key=ev["tenant_id"].encode())
                     except Exception as e:
                         log.exception("relay decode failed")
                         await send_to_dlq(m, e, GROUP)

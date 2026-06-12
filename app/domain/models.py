@@ -75,6 +75,7 @@ class Message(Base):
 class RunStatus(str, enum.Enum):
     queued = "queued"; running = "running"
     awaiting_approval = "awaiting_approval"
+    paused = "paused"
     completed = "completed"; failed = "failed"; cancelled = "cancelled"
 
 class Run(Base):
@@ -84,12 +85,15 @@ class Run(Base):
     session_id: Mapped[str] = mapped_column(ForeignKey("sessions.id"), index=True)
     user_id: Mapped[str] = mapped_column(String(36))
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.queued)
+    status_reason: Mapped[str] = mapped_column(Text, default="")
     agent_config: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default="")
     usage: Mapped[dict] = mapped_column(JSON, default=dict)
     trace_id: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 class RunEvent(Base):
@@ -192,6 +196,8 @@ class RunState(Base):
     current_agent: Mapped[str] = mapped_column(String(64), default="default")
     turn: Mapped[int] = mapped_column(Integer, default=0)
     history: Mapped[list] = mapped_column(JSON, default=list)
+    state: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(Integer, default=0)
     pending_tool_call: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
@@ -233,23 +239,37 @@ class RiskRule(Base):
     __tablename__ = "risk_rules"
     __table_args__ = (UniqueConstraint("tenant_id", "name"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    tenant_id: Mapped[str] = mapped_column(String(36), index=True, default="")
+    tenant_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
     name: Mapped[str] = mapped_column(String(64))
     description: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(default=True)
     priority: Mapped[int] = mapped_column(Integer, default=100)
     condition: Mapped[str] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(String(32), default="flag")
+    action_params: Mapped[dict] = mapped_column(JSON, default=dict)
+    severity: Mapped[str] = mapped_column(String(16), default="warning")
     cooldown_seconds: Mapped[int] = mapped_column(Integer, default=600)
     actions: Mapped[list] = mapped_column(JSON, default=list)
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_by: Mapped[str] = mapped_column(String(36), default="")
+    created_by: Mapped[str] = mapped_column(String(36), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+    @property
+    def expression(self) -> str:
+        return self.condition
 
 class RiskIncident(Base):
     __tablename__ = "risk_incidents"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    rule_id: Mapped[str] = mapped_column(String(36), default="")
     rule_name: Mapped[str] = mapped_column(String(64))
+    severity: Mapped[str] = mapped_column(String(16), default="warning")
+    action: Mapped[str] = mapped_column(String(32), default="")
+    action_executed: Mapped[bool] = mapped_column(default=False)
+    context: Mapped[dict] = mapped_column(JSON, default=dict)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     actions_taken: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)

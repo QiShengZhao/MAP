@@ -13,10 +13,10 @@ class RunQueue:
             pass
 
     @staticmethod
-    async def enqueue(tenant_id, run_id, workspace_id=""):
+    async def enqueue(tenant_id, run_id, workspace_id="", resume=False):
         await redis_client.xadd(STREAM, {"data": json.dumps(
             {"tenant_id": tenant_id, "run_id": run_id,
-             "workspace_id": workspace_id})}, maxlen=100_000)
+             "workspace_id": workspace_id, "resume": resume})}, maxlen=100_000)
 
     @staticmethod
     async def consume(consumer):

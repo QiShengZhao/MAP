@@ -1,12 +1,17 @@
-import asyncio, logging, os, socket
-from app.scheduling.queue import RunQueue
-from app.scheduling.lock import DistributedLock
-from app.execution.runner import Runner
+import asyncio
+import logging
+import os
+import socket
+
 from app.config import settings
+from app.execution.runner import RunOutcome, Runner
 from app.observability.tracing import setup_tracing
+from app.scheduling.lock import DistributedLock
+from app.scheduling.queue import RunQueue
 
 log = logging.getLogger("worker")
 CONCURRENCY = int(os.getenv("WORKER_CONCURRENCY", "4"))
+
 
 async def handle(entry_id, task, sem):
     async with sem:
@@ -16,8 +21,11 @@ async def handle(entry_id, task, sem):
             return
         keepalive = asyncio.create_task(_keepalive(lock))
         try:
-            await Runner(task["tenant_id"], task["run_id"],
-                         task.get("workspace_id", "")).execute()
+            outcome = await Runner(
+                task["tenant_id"], task["run_id"],
+                task.get("workspace_id", "")).execute(resume=bool(task.get("resume")))
+            if outcome == RunOutcome.PAUSED:
+                log.info("run %s paused (normal exit)", task["run_id"])
         except Exception:
             log.exception("run %s crashed", task["run_id"])
         finally:
@@ -25,10 +33,12 @@ async def handle(entry_id, task, sem):
             await lock.release()
             await RunQueue.ack(entry_id)
 
+
 async def _keepalive(lock):
     while True:
         await asyncio.sleep(60)
         await lock.extend()
+
 
 async def main():
     logging.basicConfig(level=logging.INFO)
@@ -40,6 +50,7 @@ async def main():
         asyncio.create_task(handle(entry_id, task, sem))
     async for entry_id, task in RunQueue.consume(consumer):
         asyncio.create_task(handle(entry_id, task, sem))
+
 
 if __name__ == "__main__":
     asyncio.run(main())

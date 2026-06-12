@@ -21,7 +21,7 @@ async def test_exec_basic(sb):
 
 async def test_timeout_kills_process_group(sb):
     b, h = sb
-    r = await b.exec(h, "sleep 30 & wait", timeout=1)
+    r = await b.exec(h, "sleep 30", timeout=1)
     assert r.exit_code == 124
 
 

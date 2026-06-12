@@ -23,6 +23,9 @@ TOPICS = {
     "risk-metrics": dict(partitions=6, rf=settings.KAFKA_RF, config={
         "retention.ms": str(24 * 3600 * 1000),
     }),
+    "run-events-json": dict(partitions=6, rf=settings.KAFKA_RF, config={
+        "retention.ms": str(3600 * 1000),
+    }),
 }
 
 

@@ -76,6 +76,7 @@ services:
     environment:
       EVENT_BUS: kafka
       EVENT_SERIALIZATION: avro
+      RELAY_MIRROR_JSON: "true"
       KAFKA_BOOTSTRAP: kafka:29092
     command: python -m app.eventbus.relay_consumer
     depends_on: [kafka, schema-registry, redis]
@@ -89,6 +90,65 @@ services:
     command: python -m app.eventbus.audit_consumer
     depends_on: [kafka, schema-registry, postgres]
     deploy: { replicas: 2 }
+  risk-consumer:
+    build: .
+    env_file: .env
+    environment:
+      EVENT_BUS: kafka
+      KAFKA_BOOTSTRAP: kafka:29092
+    command: python -m app.eventbus.risk_consumer
+    depends_on: [kafka, redis, postgres]
+  flink-jobmanager:
+    build: { context: ., dockerfile: flink/Dockerfile }
+    command: jobmanager
+    ports: ["8082:8081"]
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        state.backend: hashmap
+        state.checkpoints.dir: file:///opt/flink/checkpoints
+        execution.checkpointing.interval: 30s
+        restart-strategy.type: exponential-delay
+        restart-strategy.exponential-delay.max-backoff: 60s
+    volumes:
+      - flink-checkpoints:/opt/flink/checkpoints
+    depends_on: [kafka]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/overview"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+  flink-taskmanager:
+    build: { context: ., dockerfile: flink/Dockerfile }
+    command: taskmanager
+    environment:
+      FLINK_PROPERTIES: |
+        jobmanager.rpc.address: flink-jobmanager
+        taskmanager.numberOfTaskSlots: 4
+        taskmanager.memory.process.size: 1728m
+    volumes:
+      - flink-checkpoints:/opt/flink/checkpoints
+    depends_on: [flink-jobmanager]
+    deploy: { replicas: 1 }
+  flink-submit:
+    build: { context: ., dockerfile: flink/Dockerfile }
+    depends_on:
+      flink-jobmanager: { condition: service_healthy }
+      kafka: { condition: service_started }
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        if curl -fs http://flink-jobmanager:8081/jobs/overview \
+           | grep -q '"name":"risk-metric-aggregation".*"state":"RUNNING"'; then
+          echo "job already running, skip submit"; exit 0
+        fi
+        flink run --detached \
+          --jobmanager flink-jobmanager:8081 \
+          --python /opt/jobs/risk_job.py \
+          -- --kafka-bootstrap kafka:29092 --source-topic run-events-json
+        echo "risk job submitted"
+    restart: "no"
   tests:
     build: .
     command: pytest
@@ -102,3 +162,4 @@ services:
 volumes:
   pgdata: {}
   miniodata: {}
+  flink-checkpoints: {}

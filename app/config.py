@@ -45,11 +45,15 @@ class Settings(BaseSettings):
     S3_BUCKET: str = "agent-artifacts"
 
     # 沙箱
-    SANDBOX_BACKEND: str = "local"         # local | k8s
+    SANDBOX_BACKEND: str = "local"         # local | docker | k8s
+    DOCKER_HOST: str = ""
     SANDBOX_IMAGE: str = "agent-sandbox:latest"
+    SANDBOX_TTL_SECONDS: int = 1800
+    SANDBOX_CPU_CORES: float = 1.0
+    SANDBOX_DISK_MB: int = 512
+    SANDBOX_DOCKER_ALLOW_NET: bool = False
     BROWSER_IMAGE: str = "agent-browser:latest"
     ARTIFACT_SIDECAR_IMAGE: str = "agent-sidecar:latest"
-    SANDBOX_TTL_SECONDS: int = 3600
     SANDBOX_RUNTIME_CLASS: str = "gvisor"
     SANDBOX_RUNTIME_FALLBACK: bool = True
     SANDBOX_LOCAL_BASE_DIR: str = "/tmp/agent-sandbox"
@@ -79,6 +83,7 @@ class Settings(BaseSettings):
     SCHEMA_REGISTRY_USER: str = ""
     SCHEMA_REGISTRY_PASSWORD: str = ""
     EVENT_SERIALIZATION: str = "json"         # avro | json
+    RELAY_MIRROR_JSON: bool = False           # avro 模式下镜像 JSON 到 run-events-json（Flink）
     SCHEMA_COMPAT_MODE: str = "BACKWARD"
 
     # Stripe
@@ -99,6 +104,8 @@ class Settings(BaseSettings):
     SEATS_INCLUDED_IN_BASE: int = 3
 
     PLATFORM_DAILY_BUDGET_USD: float = 10000.0
+    RISK_DEFAULT_WEBHOOK: str = ""
+    RISK_WEBHOOK_SECRET: str = "dev-webhook-secret"
     OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
     MAX_AGENT_TURNS: int = 25
     RUN_LOCK_TTL: int = 900
@@ -126,12 +133,16 @@ class Settings(BaseSettings):
             problems.append("TRUSTED_HOSTS must be explicit")
         if self.KAFKA_SECURITY_PROTOCOL == "PLAINTEXT":
             problems.append("Kafka must use SASL_SSL in production")
-        if self.SANDBOX_BACKEND != "k8s":
-            problems.append("SANDBOX_BACKEND must be 'k8s' in production")
+        if self.SANDBOX_BACKEND not in ("k8s", "docker"):
+            problems.append("SANDBOX_BACKEND must be 'k8s' or 'docker' in production")
+        if self.SANDBOX_BACKEND == "docker" and self.SANDBOX_DOCKER_ALLOW_NET:
+            problems.append("SANDBOX_DOCKER_ALLOW_NET must be false in production")
         if not self.INTERNAL_TOKEN or len(self.INTERNAL_TOKEN) < 32:
             problems.append("INTERNAL_TOKEN required (>=32 bytes)")
         if not self.SECURE_COOKIES:
             problems.append("SECURE_COOKIES must be true")
+        if len(self.RISK_WEBHOOK_SECRET) < 32:
+            problems.append("RISK_WEBHOOK_SECRET must be >=32 bytes in production")
         if problems:
             raise RuntimeError("PRODUCTION CONFIG REFUSED:\n- " + "\n- ".join(problems))
         return self

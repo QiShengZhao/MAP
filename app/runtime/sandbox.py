@@ -163,6 +163,13 @@ class SandboxManager:
             cls._cache[key] = sbx
             return sbx
 
+        if backend is not None and settings.SANDBOX_BACKEND == "docker":
+            from app.runtime.sandbox_docker import DockerSandboxAdapter
+            handle = await backend.ensure(tenant_id, session_id)
+            sbx = DockerSandboxAdapter(handle, backend)
+            cls._cache[key] = sbx
+            return sbx
+
         await load_kube()
         api = client.CoreV1Api()
         ns = ns_for_tenant(tenant_id)
@@ -209,7 +216,7 @@ class SandboxManager:
 
         key = f"{tenant_id}:{session_id}"
         backend = get_sandbox_backend()
-        if backend is not None and settings.SANDBOX_BACKEND == "local":
+        if backend is not None and settings.SANDBOX_BACKEND in ("local", "docker"):
             cached = cls._cache.pop(key, None)
             if cached and hasattr(cached, "_handle"):
                 await backend.terminate(cached._handle)

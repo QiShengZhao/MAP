@@ -1,79 +1,131 @@
-import jwt
+"""依赖链：①JWT(kid 轮换) → ②TenantMember 校验 → ③Workspace 校验（RLS 兜底）。"""
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from fastapi import Depends, Header, HTTPException, Query
-from passlib.context import CryptContext
+
+import jwt as pyjwt
+from fastapi import Depends, HTTPException, Query, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
-from app.config import settings
-from app.infra.db import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.domain.models import TenantMember, Workspace, WorkspaceMember
+from app.infra.db import get_db, tenant_session
+from app.infra.redis_client import get_redis
+from app.security.jwt_keys import verify
+from app.security.passwords import hash_password, verify_password
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+log = logging.getLogger("api.deps")
+_bearer = HTTPBearer(auto_error=False)
 
-def hash_password(p): return pwd_ctx.hash(p)
-def verify_password(p, h): return pwd_ctx.verify(p, h)
-
-def create_token(user_id: str) -> str:
-    return jwt.encode(
-        {"sub": user_id, "exp": datetime.utcnow() +
-         timedelta(minutes=settings.JWT_EXPIRE_MINUTES)},
-        settings.JWT_SECRET, algorithm="HS256")
-
-def decode_token(token: str) -> str:
-    try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])["sub"]
-    except jwt.PyJWTError:
-        raise HTTPException(401, "invalid or expired token")
 
 @dataclass
 class AuthContext:
     user_id: str
     tenant_id: str
-    tenant_role: str
+    role: str
+    jti: str = ""
+
     @property
-    def is_admin(self): return self.tenant_role in ("owner", "admin")
+    def tenant_role(self) -> str:
+        return self.role
 
-async def get_current_user(authorization: str = Header(...)) -> str:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(401, "missing bearer token")
-    return decode_token(authorization[7:])
+    @property
+    def is_admin(self) -> bool:
+        return self.role in ("owner", "admin")
 
-async def get_auth(user_id: str = Depends(get_current_user),
-                   x_tenant_id: str = Header(...),
-                   db=Depends(get_db)) -> AuthContext:
-    member = (await db.execute(select(TenantMember).where(
-        TenantMember.tenant_id == x_tenant_id,
-        TenantMember.user_id == user_id))).scalar_one_or_none()
+
+async def get_auth(request: Request,
+                   cred: HTTPAuthorizationCredentials = Depends(_bearer),
+                   db: AsyncSession = Depends(get_db)) -> AuthContext:
+    if cred is None:
+        raise HTTPException(401, "missing bearer token",
+                            headers={"WWW-Authenticate": "Bearer"})
+    try:
+        claims = verify(cred.credentials)
+    except pyjwt.ExpiredSignatureError:
+        raise HTTPException(401, "token expired")
+    except pyjwt.InvalidTokenError as e:
+        raise HTTPException(401, f"invalid token: {e}")
+
+    if claims.get("typ") != "access":
+        raise HTTPException(401, "wrong token type")
+
+    r = await get_redis()
+    if await r.exists(f"jwt:revoked:{claims['jti']}"):
+        raise HTTPException(401, "token revoked")
+
+    member = await db.scalar(select(TenantMember).where(
+        TenantMember.tenant_id == claims["tid"],
+        TenantMember.user_id == claims["sub"]))
     if not member:
         raise HTTPException(403, "not a member of this tenant")
-    return AuthContext(user_id, x_tenant_id, member.role)
 
-async def get_auth_sse(token: str = Query(...), tenant_id: str = Query(...),
-                       db=Depends(get_db)) -> AuthContext:
-    user_id = decode_token(token)
-    member = (await db.execute(select(TenantMember).where(
-        TenantMember.tenant_id == tenant_id,
-        TenantMember.user_id == user_id))).scalar_one_or_none()
+    ctx = AuthContext(user_id=claims["sub"], tenant_id=claims["tid"],
+                      role=member.role, jti=claims["jti"])
+    request.state.tenant_id = ctx.tenant_id
+    request.state.user_id = ctx.user_id
+    return ctx
+
+
+async def get_auth_sse(token: str = Query(...), db: AsyncSession = Depends(get_db)) -> AuthContext:
+    try:
+        claims = verify(token)
+    except pyjwt.InvalidTokenError:
+        raise HTTPException(401, "invalid token")
+    if claims.get("typ") != "access":
+        raise HTTPException(401, "wrong token type")
+    r = await get_redis()
+    if await r.exists(f"jwt:revoked:{claims['jti']}"):
+        raise HTTPException(401, "token revoked")
+    member = await db.scalar(select(TenantMember).where(
+        TenantMember.tenant_id == claims["tid"],
+        TenantMember.user_id == claims["sub"]))
     if not member:
         raise HTTPException(403, "not a member of this tenant")
-    return AuthContext(user_id, tenant_id, member.role)
+    return AuthContext(user_id=claims["sub"], tenant_id=claims["tid"],
+                       role=member.role, jti=claims["jti"])
 
-async def check_workspace(workspace_id, auth, db) -> Workspace:
-    ws = (await db.execute(select(Workspace).where(
-        Workspace.id == workspace_id,
-        Workspace.tenant_id == auth.tenant_id))).scalar_one_or_none()
-    if not ws:
-        raise HTTPException(404, "workspace not found")
-    if auth.is_admin:
-        return ws
-    wm = (await db.execute(select(WorkspaceMember).where(
-        WorkspaceMember.workspace_id == workspace_id,
-        WorkspaceMember.user_id == auth.user_id))).scalar_one_or_none()
-    if not wm:
-        raise HTTPException(403, "no workspace access")
-    return ws
+
+async def get_tenant_db(auth: AuthContext = Depends(get_auth)):
+    async with tenant_session(auth.tenant_id) as db:
+        yield db
+
+
+def require_role(*roles: str):
+    async def _check(auth: AuthContext = Depends(get_auth)) -> AuthContext:
+        if auth.role not in roles:
+            raise HTTPException(403, f"requires role: {roles}")
+        return auth
+    return _check
+
 
 def require_admin(auth: AuthContext = Depends(get_auth)) -> AuthContext:
     if not auth.is_admin:
         raise HTTPException(403, "admin role required")
     return auth
+
+
+async def check_workspace(workspace_id: str, auth: AuthContext,
+                          db: AsyncSession) -> Workspace:
+    ws = await db.scalar(select(Workspace).where(
+        Workspace.id == workspace_id,
+        Workspace.tenant_id == auth.tenant_id))
+    if not ws:
+        raise HTTPException(404, "workspace not found")
+    if auth.role != "owner" and not auth.is_admin:
+        wm = await db.scalar(select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == auth.user_id))
+        if not wm:
+            raise HTTPException(403, "no access to this workspace")
+    return ws
+
+
+# 兼容旧代码
+def create_token(user_id: str) -> str:
+    from app.security.jwt_keys import issue_access
+    return issue_access(user_id, "", "")
+
+
+def decode_token(token: str) -> str:
+    return verify(token)["sub"]

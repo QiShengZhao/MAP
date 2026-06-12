@@ -2,247 +2,94 @@
 <html lang="zh"><head>
 <meta charset="utf-8"><title>Agent Platform Console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-:root{--bg:#0f1117;--panel:#171a23;--border:#262b38;--text:#e2e6ef;--dim:#8b93a7;
---accent:#5b8cff;--ok:#3fb96f;--warn:#e6a23c;--err:#e35d6a}
-*{box-sizing:border-box;margin:0}
-body{background:var(--bg);color:var(--text);font:14px/1.5 ui-sans-serif,system-ui;height:100vh;display:flex;flex-direction:column}
-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel)}
-header h1{font-size:15px}.spacer{flex:1}
-header select,header input{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px}
-#budgetBanner{display:none;padding:8px 16px;font-size:13px;text-align:center}
-#budgetBanner.warning{display:block;background:#3a2f12;color:var(--warn)}
-#budgetBanner.critical,#budgetBanner.emergency{display:block;background:#3a1518;color:var(--err)}
-main{flex:1;display:grid;grid-template-columns:230px 1fr 300px;min-height:0}
-.col{border-right:1px solid var(--border);overflow-y:auto;background:var(--panel)}
-.col h3{font-size:12px;color:var(--dim);text-transform:uppercase;padding:12px 12px 6px}
-.item{padding:8px 12px;cursor:pointer;border-left:2px solid transparent;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.item:hover{background:#1d2230}.item.active{border-left-color:var(--accent);background:#1d2230}
-#chat{display:flex;flex-direction:column;min-width:0;background:var(--bg)}
-#msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
-.msg{max-width:78%;padding:10px 14px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
-.msg.user{align-self:flex-end;background:var(--accent);color:#fff}
-.msg.assistant{align-self:flex-start;background:var(--panel);border:1px solid var(--border)}
-.msg.event{align-self:center;color:var(--dim);font-size:12px;background:none;padding:2px}
-.tool{align-self:flex-start;max-width:78%;border:1px solid var(--border);border-radius:8px;font-size:12px;overflow:hidden}
-.tool .hd{padding:6px 10px;background:#1d2230;color:var(--accent);cursor:pointer}
-.tool pre{padding:8px 10px;color:var(--dim);max-height:180px;overflow:auto;display:none}
-.tool.open pre{display:block}
-.tool.fail .hd{color:var(--err)}
-#composer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border)}
-#composer textarea{flex:1;background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;resize:none;font:inherit;height:60px}
-button{background:var(--accent);border:0;border-radius:8px;color:#fff;padding:8px 16px;cursor:pointer;font:inherit}
-button:disabled{opacity:.4;cursor:default}
-button.ghost{background:transparent;border:1px solid var(--border);color:var(--dim)}
-button.danger{background:var(--err)}
-.side section{padding:0 0 8px}
-.kv{display:flex;justify-content:space-between;padding:3px 12px;font-size:12px;color:var(--dim)}
-.kv b{color:var(--text)}
-.artifact{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;font-size:12px}
-.artifact a{color:var(--accent);text-decoration:none}
-.badge{font-size:11px;padding:1px 8px;border-radius:10px;border:1px solid var(--border);color:var(--dim)}
-.badge.running{color:var(--accent);border-color:var(--accent)}
-.badge.completed{color:var(--ok);border-color:var(--ok)}
-.badge.failed{color:var(--err);border-color:var(--err)}
-.badge.awaiting_approval{color:var(--warn);border-color:var(--warn)}
-dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:480px}
-dialog::backdrop{background:rgba(0,0,0,.6)}
-dialog pre{background:#0f1117;padding:10px;border-radius:8px;font-size:12px;overflow:auto;max-height:200px;margin:10px 0}
-#login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;z-index:10}
-#login input{width:280px;background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px}
-.cursor::after{content:"▍";animation:b 1s infinite}@keyframes b{50%{opacity:0}}
-.hidden{display:none!important}
-</style></head><body>
+<link rel="stylesheet" href="/css/console.css">
+</head><body>
 
+<!-- ═══ 登录 ═══ -->
 <div id="login">
   <h1>Agent Platform</h1>
-  <input id="email" placeholder="email"><input id="pwd" type="password" placeholder="password">
-  <div style="display:flex;gap:8px"><button onclick="login()">登录</button>
-  <button class="ghost" onclick="register()">注册</button></div>
-  <div id="loginErr" style="color:var(--err);font-size:13px"></div>
+  <input id="loginEmail" placeholder="email" autocomplete="username">
+  <input id="loginPwd" type="password" placeholder="password" autocomplete="current-password">
+  <div class="row">
+    <button onclick="Auth.login()">登录</button>
+    <button class="ghost" onclick="Auth.register()">注册租户</button>
+  </div>
+  <div id="loginErr" class="err-text"></div>
 </div>
 
-<header class="hidden" id="appHeader">
+<!-- ═══ Header + 主导航 ═══ -->
+<header class="hidden">
   <h1>⚙️ Agent Console</h1>
-  <select id="tenantSel" onchange="onTenantChange()"></select>
-  <select id="wsSel" onchange="onWorkspaceChange()"></select>
+  <nav id="mainNav">
+    <a href="#/chat" data-view="chat">💬 对话</a>
+    <a href="#/ops/runs" data-view="ops" class="admin-only">⚙️ 运维</a>
+    <a href="#/risk/rules" data-view="risk" class="admin-only">🛡️ 风控</a>
+    <a href="#/config/policy" data-view="config">🔧 配置</a>
+  </nav>
+  <select id="wsSel" onchange="Chat.onWorkspaceChange()"></select>
   <span id="runBadge" class="badge">idle</span>
   <div class="spacer"></div>
-  <span id="who" style="color:var(--dim);font-size:12px"></span>
-  <button class="ghost" onclick="logout()">退出</button>
+  <span id="who" class="dim"></span>
+  <button class="ghost" onclick="Auth.logout()">退出</button>
 </header>
-<div id="budgetBanner"></div>
 
-<main class="hidden" id="appMain">
-  <div class="col"><h3>当前会话 <button class="ghost" style="float:right;margin-right:8px;padding:0 8px" onclick="newSession()">+</button></h3>
-    <div id="sessInfo" class="item active">新对话</div></div>
-  <div id="chat">
-    <div id="msgs"></div>
-    <div id="composer">
-      <textarea id="input" placeholder="输入任务… (Ctrl+Enter 发送)"></textarea>
-      <button id="sendBtn" onclick="send()">发送</button>
-      <button id="cancelBtn" class="danger hidden" onclick="cancelRun()">终止</button>
+<!-- ═══ 全局 banner（租户暂停 / 预算）═══ -->
+<div id="tenantBanner" class="banner"></div>
+<div id="budgetBanner" class="banner"></div>
+
+<!-- ═══ 视图容器 ═══ -->
+<main class="hidden">
+  <!-- 对话页（默认） -->
+  <div id="view-chat" class="view">
+    <div class="col" id="sessCol">
+      <h3>Sessions <button class="ghost mini" onclick="Chat.newSession()">+</button></h3>
+      <div id="sessList"></div>
+    </div>
+    <div id="chatMain">
+      <div id="msgs"></div>
+      <div id="composer">
+        <textarea id="input" placeholder="输入任务… (Ctrl+Enter 发送)"></textarea>
+        <div class="btn-col">
+          <button id="sendBtn" onclick="Chat.send()">发送</button>
+          <button id="btnPause" class="ghost admin-only hidden" onclick="Chat.pauseRun()">⏸ 暂停</button>
+          <button id="btnResume" class="ghost admin-only hidden" onclick="Chat.resumeRun()">▶ 恢复</button>
+          <button id="btnCancel" class="danger hidden" onclick="Chat.cancelRun()">终止</button>
+        </div>
+      </div>
+    </div>
+    <div class="col side">
+      <section><h3>用量 / 预算</h3><div id="usage"></div></section>
+      <section><h3>产物 Artifacts</h3><div id="artifacts"></div></section>
+      <section><h3>待审批</h3><div id="approvals"></div></section>
     </div>
   </div>
-  <div class="col side">
-    <section><h3>用量 / 预算</h3><div id="usage"></div></section>
-    <section><h3>产物 Artifacts</h3><div id="artifacts"></div></section>
-    <section><h3>待审批</h3><div id="approvals"></div></section>
-  </div>
+
+  <!-- 运维 / 风控 / 配置（模块自渲染） -->
+  <div id="view-ops"    class="view hidden"><div class="subnav" id="opsNav"></div><div class="content" id="opsContent"></div></div>
+  <div id="view-risk"   class="view hidden"><div class="subnav" id="riskNav"></div><div class="content" id="riskContent"></div></div>
+  <div id="view-config" class="view hidden"><div class="subnav" id="cfgNav"></div><div class="content" id="cfgContent"></div></div>
 </main>
 
+<!-- ═══ 审批弹窗（复用既有样式）═══ -->
 <dialog id="apvDlg">
-  <h3 style="color:var(--warn)">⚠️ 高风险操作待审批</h3>
-  <p id="apvTool" style="margin-top:8px"></p><pre id="apvArgs"></pre>
-  <div style="display:flex;gap:8px;justify-content:flex-end">
-    <button class="ghost" onclick="decide(false)">拒绝</button>
-    <button onclick="decide(true)">批准</button>
+  <h3 class="warn-title">⚠️ 高风险操作待审批</h3>
+  <p id="apvTool"></p><pre id="apvArgs"></pre>
+  <div class="row right">
+    <button class="ghost" onclick="Chat.decide(false)">拒绝</button>
+    <button onclick="Chat.decide(true)">批准</button>
   </div>
 </dialog>
 
-<script>
-const $=id=>document.getElementById(id);
-let token=localStorage.token||'', tenantId=localStorage.tenantId||'',
-    workspaceId=localStorage.workspaceId||'', curSession=null, curRun=null,
-    streamEs=null, curApproval=null;
+<!-- ═══ 通用 Modal / Toast 容器 ═══ -->
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
 
-const hdr=()=>({'Content-Type':'application/json','Authorization':'Bearer '+token,'X-Tenant-Id':tenantId});
-const api=async(path,opt={})=>{
-  const r=await fetch('/v1'+path,{...opt,headers:{...hdr(),...(opt.headers||{})}});
-  if(r.status===401){logout();throw new Error('401')}
-  if(!r.ok){let d='';try{d=(await r.json()).detail}catch(_){d=r.status}throw new Error(d||r.status)}
-  return r.status===204?null:r.json();
-};
-
-async function login(){try{
-  const r=await api('/auth/login',{method:'POST',body:JSON.stringify({email:$('email').value,password:$('pwd').value})});
-  token=r.token;localStorage.token=token;
-  if(!r.tenants?.length){await api('/auth/tenants',{method:'POST',body:JSON.stringify({name:'My Org',slug:'org-'+Date.now()})});
-    return login();}
-  tenantId=r.tenants[0].id;localStorage.tenantId=tenantId;
-  boot(r.tenants);
-}catch(e){$('loginErr').textContent=e.message}}
-
-async function register(){try{
-  await api('/auth/register',{method:'POST',body:JSON.stringify({email:$('email').value,password:$('pwd').value})});
-  await login();
-}catch(e){$('loginErr').textContent=e.message}}
-
-function logout(){localStorage.clear();location.reload()}
-
-async function boot(tenants){
-  $('login').classList.add('hidden');
-  $('appHeader').classList.remove('hidden');
-  $('appMain').classList.remove('hidden');
-  $('tenantSel').innerHTML=tenants.map(t=>`<option value="${t.id}" ${t.id===tenantId?'selected':''}>${esc(t.name)}</option>`).join('');
-  localStorage.tenantName=tenants.find(t=>t.id===tenantId)?.name||'';
-  $('who').textContent=localStorage.tenantName;
-  const ws=await api('/workspaces');
-  $('wsSel').innerHTML=ws.length?ws.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('')
-    :'<option value="">— 无工作区 —</option>';
-  if(ws.length){workspaceId=ws[0].id;localStorage.workspaceId=workspaceId}
-  pollSide();setInterval(pollSide,10000);
-}
-
-function onTenantChange(){tenantId=$('tenantSel').value;localStorage.tenantId=tenantId;loadWorkspaces()}
-async function onWorkspaceChange(){workspaceId=$('wsSel').value;localStorage.workspaceId=workspaceId}
-async function loadWorkspaces(){
-  const ws=await api('/workspaces');
-  $('wsSel').innerHTML=ws.map(w=>`<option value="${w.id}">${esc(w.name)}</option>`).join('');
-  if(ws.length)workspaceId=ws[0].id;
-}
-
-function newSession(){curSession=null;$('msgs').innerHTML='';$('sessInfo').textContent='新对话';setBadge('idle')}
-
-async function send(){
-  const text=$('input').value.trim();
-  if(!text||curRun||!workspaceId)return;
-  $('input').value='';addMsg('user',text);
-  const r=await api('/messages',{method:'POST',body:JSON.stringify({workspace_id:workspaceId,session_id:curSession,content:text})});
-  curSession=r.session_id;$('sessInfo').textContent='会话 '+curSession.slice(0,8)+'…';
-  curRun=r.run_id;setRunning(true);streamRun(r.run_id);
-}
-
-function streamRun(runId){
-  if(streamEs)streamEs.close();
-  const url=`/v1/runs/${runId}/stream?token=${encodeURIComponent(token)}&tenant_id=${encodeURIComponent(tenantId)}`;
-  streamEs=new EventSource(url);
-  let asstEl=null;
-  streamEs.addEventListener('model.delta',e=>{
-    const p=JSON.parse(e.data);
-    if(!asstEl){asstEl=addMsg('assistant','');asstEl.classList.add('cursor')}
-    asstEl.textContent+=p.text||'';scroll_();
-  });
-  streamEs.addEventListener('tool.call',e=>{const p=JSON.parse(e.data);addTool(p);});
-  streamEs.addEventListener('tool.result',e=>{finishTool(JSON.parse(e.data));});
-  streamEs.addEventListener('tool.blocked',e=>{addEvent('⛔ 工具被拦截: '+JSON.parse(e.data).name);});
-  streamEs.addEventListener('agent.handoff',e=>{const p=JSON.parse(e.data);addEvent(`🔀 交接：${p.from||'?'} → ${p.to||'?'}`);});
-  streamEs.addEventListener('approval.required',e=>{
-    const p=JSON.parse(e.data);curApproval=p.approval_id;
-    setBadge('awaiting_approval');
-    $('apvTool').textContent='工具：'+p.tool;
-    $('apvArgs').textContent=JSON.stringify(p.args,null,2);
-    $('apvDlg').showModal();
-  });
-  streamEs.addEventListener('run.budget_exceeded',e=>{addEvent('⛔ 预算熔断');});
-  const end=()=>{if(curRun===runId){curRun=null;setRunning(false);streamEs?.close();pollSide()}};
-  streamEs.addEventListener('run.completed',e=>{if(asstEl)asstEl.classList.remove('cursor');setBadge('completed');end();});
-  streamEs.addEventListener('run.failed',e=>{addEvent('❌ '+JSON.parse(e.data).reason);setBadge('failed');end();});
-  streamEs.addEventListener('run.cancelled',()=>{addEvent('已取消');setBadge('cancelled');end();});
-}
-
-async function decide(approve){
-  $('apvDlg').close();
-  await api(`/approvals/${curApproval}/decide`,{method:'POST',body:JSON.stringify({approved:approve})});
-  setBadge('running');curApproval=null;
-}
-async function cancelRun(){if(curRun)await api(`/runs/${curRun}/cancel`,{method:'POST'})}
-
-async function pollSide(){
-  try{
-    const summary=await api('/usage/summary?days=1');
-    const budget=await api('/usage/budget');
-    const pct=budget.limit_usd?budget.used_usd/budget.limit_usd:0;
-    $('usage').innerHTML=[['今日用量',Object.entries(summary).map(([k,v])=>k+':'+v).join(' ')||'—'],
-      ['已用/限额',`$${(+budget.used_usd).toFixed(4)} / $${(+budget.limit_usd).toFixed(2)}`],
-      ['剩余',`$${(+budget.remaining_usd).toFixed(4)}`]].map(([k,v])=>`<div class="kv">${k}<b>${v}</b></div>`).join('');
-    const b=$('budgetBanner');b.className='';
-    if(pct>=0.9){b.className='emergency';b.textContent='⛔ 预算告急'}
-    else if(pct>=0.7){b.className='critical';b.textContent='🚨 预算即将耗尽'}
-    else if(pct>=0.5){b.className='warning';b.textContent='⚠️ 预算消耗较快'}
-    if(curSession){
-      const arts=await api(`/artifacts?session_id=${curSession}`);
-      $('artifacts').innerHTML=arts.map(a=>`<div class="artifact"><span>${esc(a.name)}</span>
-        <a href="#" onclick="dl('${a.id}');return false">↓ ${fmtSize(a.size)}</a></div>`).join('')||'<div class="kv">暂无</div>';
-    }
-    const apvs=await api('/approvals');
-    $('approvals').innerHTML=apvs.map(a=>`<div class="artifact"><span>${esc(a.tool)}</span>
-      <a href="#" onclick="openApv('${a.id}','${esc(a.tool)}');return false">审批</a></div>`).join('')||'<div class="kv">无</div>';
-  }catch(_){}
-}
-function openApv(id,tool){curApproval=id;$('apvTool').textContent='工具：'+tool;$('apvArgs').textContent='';$('apvDlg').showModal()}
-async function dl(id){const r=await api(`/artifacts/${id}/download`);window.open(r.url)}
-
-function addMsg(role,text){const d=document.createElement('div');d.className='msg '+role;
-  d.textContent=text;$('msgs').appendChild(d);scroll_();return d}
-function addEvent(t){const d=document.createElement('div');d.className='msg event';d.textContent=t;$('msgs').appendChild(d);scroll_()}
-function addTool(p){const d=document.createElement('div');d.className='tool';d.dataset.cid=p.id;
-  d.innerHTML=`<div class="hd" onclick="this.parentNode.classList.toggle('open')">🔧 ${esc(p.name)} <span class="st">⏳</span></div>
-  <pre>${esc(JSON.stringify(p.args,null,2))}</pre>`;$('msgs').appendChild(d);scroll_()}
-function finishTool(p){const d=document.querySelector(`.tool[data-cid="${p.id}"]`);if(!d)return;
-  const ok=!String(p.output||'').includes('"error"');
-  d.querySelector('.st').textContent=ok?'✅':'❌';if(!ok)d.classList.add('fail');
-  d.querySelector('pre').textContent+=`\n── result ──\n${(p.output||'').slice(0,2000)}`}
-function setRunning(on){$('sendBtn').disabled=on;$('cancelBtn').classList.toggle('hidden',!on);if(on)setBadge('running')}
-function setBadge(s){const b=$('runBadge');b.className='badge '+s;b.textContent=s.replace('_',' ')}
-function scroll_(){$('msgs').scrollTop=$('msgs').scrollHeight}
-function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function fmtSize(n){return n>1048576?(n/1048576).toFixed(1)+'MB':n>1024?(n/1024).toFixed(1)+'KB':n+'B'}
-$('input').addEventListener('keydown',e=>{if(e.ctrlKey&&e.key==='Enter')send()});
-if(token&&tenantId){
-  $('login').classList.add('hidden');
-  $('appHeader').classList.remove('hidden');
-  $('appMain').classList.remove('hidden');
-  boot([{id:tenantId,name:localStorage.tenantName||tenantId}]);
-}
-</script></body></html>
+<script src="/js/api.js"></script>
+<script src="/js/components.js"></script>
+<script src="/js/chat.js"></script>
+<script src="/js/ops.js"></script>
+<script src="/js/risk.js"></script>
+<script src="/js/billing.js"></script>
+<script src="/js/config.js"></script>
+<script src="/js/auth.js"></script>
+</body></html>

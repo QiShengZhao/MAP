@@ -34,6 +34,15 @@ class UsageMeter:
                 "by_model": self.by_model,
                 "cost_usd": round(self.cost_usd, 6)}
 
+    def restore(self, data: dict) -> None:
+        if not data:
+            return
+        self.tokens = dict(data.get("tokens", self.tokens))
+        self.tool_calls = dict(data.get("tool_calls", self.tool_calls))
+        self.sandbox_seconds = data.get("sandbox_seconds", 0)
+        self.by_model = dict(data.get("by_model", self.by_model))
+        self.cost_usd = float(data.get("cost_usd", 0))
+
     async def check_token_quota(self, policy):
         day = datetime.utcnow().strftime("%Y%m%d")
         key = f"quota:tokens:{self.tenant_id}:{day}"

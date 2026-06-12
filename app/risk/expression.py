@@ -17,6 +17,7 @@ class ExpressionError(Exception): pass
 def evaluate(source: str, variables: dict) -> bool:
     return SafeExpression(source).evaluate(variables)
 
+
 class SafeExpression:
     def __init__(self, source):
         self.source = source
@@ -89,3 +90,11 @@ class SafeExpression:
         if isinstance(node, ast.Constant):
             return node.value
         raise ExpressionError("unreachable")
+
+
+def compile_expr(source: str) -> SafeExpression:
+    return SafeExpression(source)
+
+
+def evaluate_compiled(compiled: SafeExpression, variables: dict) -> bool:
+    return compiled.evaluate(variables)
