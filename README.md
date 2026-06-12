@@ -6,6 +6,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-async-009688.svg)]()
+[![CI](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml/badge.svg)](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml)
 [![Kubernetes](https://img.shields.io/badge/K8s-gVisor-326CE5.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)]()
 [![Tests](https://img.shields.io/badge/tests-56%20passed-0A9EDC.svg)]()
@@ -549,7 +550,7 @@ pytest --cov=app --cov-report=html     # 覆盖率报告
 
 ## 🗺 Roadmap
 
-- [ ] GitHub Actions CI（pytest + compose 冒烟）
+- [x] GitHub Actions CI（pytest + compose 冒烟）
 - [ ] pause/resume 端到端集成测试
 - [ ] 工具幂等缓存（resume 不重放已执行 tool call）
 - [ ] 平台级风控规则（`is_platform_admin`）
