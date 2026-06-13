@@ -7,6 +7,12 @@ if redis.call('get', KEYS[1]) == ARGV[1] then
 else return 0 end
 """
 
+EXTEND_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('expire', KEYS[1], tonumber(ARGV[2]))
+else return 0 end
+"""
+
 class LockNotAcquired(Exception): pass
 
 class DistributedLock:
@@ -18,8 +24,8 @@ class DistributedLock:
                                            ex=self.ttl))
 
     async def extend(self):
-        if await redis_client.get(self.key) == self.token:
-            await redis_client.expire(self.key, self.ttl)
+        return bool(await redis_client.eval(
+            EXTEND_LUA, 1, self.key, self.token, self.ttl))
 
     async def release(self):
         await redis_client.eval(RELEASE_LUA, 1, self.key, self.token)
