@@ -305,7 +305,7 @@ class Runner:
     async def _execute_tool(self, db, run, tools, policy, usage, call) -> str:
         await self.emit(db, "tool.call", {"id": call.id, "name": call.name, "args": call.args})
         try:
-            Guardrails.check_tool_call(policy, call)
+            await Guardrails.check_tool_call(policy, call)
             PolicyService.check_tool_allowed(policy, call.name)
         except GuardrailBlocked as e:
             await self.emit(db, "tool.blocked", {"name": call.name, "reason": str(e)})

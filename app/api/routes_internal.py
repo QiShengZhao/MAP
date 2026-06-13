@@ -3,7 +3,7 @@ from fastapi import APIRouter, Header, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy import select
 from app.config import settings
-from app.infra.db import get_db
+from app.infra.db import get_db, set_tenant_context
 from app.infra.redis_client import redis_client
 from app.domain.models import Artifact, Run, RunStatus
 
@@ -23,7 +23,9 @@ class SidecarArtifactReq(BaseModel):
 
 @router.post("/artifacts", dependencies=[Depends(verify_internal)])
 async def sidecar_artifact(req: SidecarArtifactReq, db=Depends(get_db)):
+    await set_tenant_context(db, req.tenant_id)
     run = (await db.execute(select(Run).where(
+        Run.tenant_id == req.tenant_id,
         Run.session_id == req.session_id, Run.status == RunStatus.running)
         .order_by(Run.created_at.desc()).limit(1))).scalar_one_or_none()
     a = Artifact(tenant_id=req.tenant_id, run_id=run.id if run else "",

@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     ENV: str = "dev"                       # dev | test | staging | production
 
     # 基础设施
-    DATABASE_URL: str = "postgresql+asyncpg://agent:agent@localhost:5432/agent_platform"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://agent_runtime:agent_runtime"
+        "@localhost:5432/agent_platform"
+    )
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT（兼容旧字段 + kid 轮换）

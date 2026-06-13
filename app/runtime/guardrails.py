@@ -1,4 +1,7 @@
+import asyncio
+import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 
 class GuardrailBlocked(Exception): pass
@@ -19,6 +22,25 @@ SECRET_PATTERNS = [
 ]
 PRIVATE_NETS = ("127.", "10.", "192.168.", "169.254.", "0.0.0.0", "localhost")
 
+
+def _blocked_ip(value: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        try:
+            ip = ipaddress.ip_address(socket.inet_ntoa(socket.inet_aton(value)))
+        except OSError:
+            return False
+    return any((
+        ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast,
+        ip.is_reserved, ip.is_unspecified,
+    ))
+
+
+async def _getaddrinfo(host: str, port: int):
+    return await asyncio.to_thread(
+        socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
+
 def check_command(cmd: str) -> None:
     for pat in DANGEROUS_PATTERNS:
         if re.search(pat, cmd):
@@ -34,7 +56,7 @@ def check_url(url: str, blocked_domains: list | None = None) -> None:
         raise GuardrailBlocked("invalid url")
     if any(host.startswith(p.rstrip(".")) for p in PRIVATE_NETS):
         raise GuardrailBlocked("SSRF: private network access denied")
-    if host in ("0x7f000001", "[::1]"):
+    if _blocked_ip(host):
         raise GuardrailBlocked("SSRF: private network access denied")
     scheme = (urlparse(url).scheme or "").lower()
     if scheme not in ("http", "https"):
@@ -42,6 +64,22 @@ def check_url(url: str, blocked_domains: list | None = None) -> None:
     for domain in (blocked_domains or []):
         if host == domain or host.endswith("." + domain):
             raise GuardrailBlocked(f"domain blocked: {domain}")
+
+
+async def check_url_resolved(
+        url: str, blocked_domains: list | None = None) -> None:
+    check_url(url, blocked_domains)
+    parsed = urlparse(url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        addresses = await _getaddrinfo(parsed.hostname or "", port)
+    except socket.gaierror as exc:
+        raise GuardrailBlocked(f"DNS resolution failed: {exc}") from exc
+    for result in addresses:
+        address = result[4][0]
+        if _blocked_ip(address):
+            raise GuardrailBlocked(
+                f"SSRF: hostname resolved to private address {address}")
 
 
 def scan_secrets(text: str) -> list[dict]:
@@ -58,8 +96,9 @@ def scan_secrets(text: str) -> list[dict]:
 
 class Guardrails:
     @staticmethod
-    def check_tool_call(policy, call):
+    async def check_tool_call(policy, call):
         if call.name == "run_command":
             check_command(call.args.get("command", ""))
         if call.name in ("web_fetch", "browser_visit", "browser_screenshot"):
-            check_url(call.args.get("url", ""), policy.blocked_domains or [])
+            await check_url_resolved(
+                call.args.get("url", ""), policy.blocked_domains or [])

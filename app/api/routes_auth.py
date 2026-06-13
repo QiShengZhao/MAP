@@ -192,12 +192,15 @@ async def logout(cred: HTTPAuthorizationCredentials = Depends(_bearer)):
 
 
 @router.post("/tenants")
-async def create_tenant(req: CreateTenantReq, auth=Depends(get_auth), db=Depends(get_db)):
-    tenant = Tenant(name=req.name, slug=req.slug)
-    db.add(tenant)
-    await db.flush()
-    db.add(TenantMember(tenant_id=tenant.id, user_id=auth.user_id, role="owner"))
-    db.add(TenantPolicy(tenant_id=tenant.id,
-                        approval_required_tools=["deploy_to_production"]))
-    await db.commit()
-    return {"tenant_id": tenant.id}
+async def create_tenant(req: CreateTenantReq, auth=Depends(get_auth)):
+    async with db_mod.session_factory() as db:
+        tenant = Tenant(name=req.name, slug=req.slug)
+        db.add(tenant)
+        await db.flush()
+        db.add(TenantMember(
+            tenant_id=tenant.id, user_id=auth.user_id, role="owner"))
+        db.add(TenantPolicy(
+            tenant_id=tenant.id,
+            approval_required_tools=["deploy_to_production"]))
+        await db.commit()
+        return {"tenant_id": tenant.id}

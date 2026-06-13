@@ -221,7 +221,7 @@ cp .env.example .env
 docker compose up -d postgres redis minio api worker scheduler sandbox-reaper
 
 # 2. 初始化数据库（Alembic 建表 + 启用 RLS）
-docker compose run --rm api python scripts/init_db.py
+docker compose --profile tools run --rm db-migrate
 # 等价于：alembic upgrade head
 ```
 
@@ -236,7 +236,7 @@ docker compose run --rm api python scripts/init_db.py
 
 ```bash
 docker compose up -d
-docker compose run --rm api python scripts/init_db.py
+docker compose --profile tools run --rm db-migrate
 ```
 
 | 服务 | 地址 |
@@ -265,7 +265,8 @@ cp .env.example .env
 
 # 改 DATABASE_URL / REDIS_URL / S3_ENDPOINT 为 localhost
 docker compose up -d postgres redis minio
-python scripts/init_db.py
+DATABASE_URL=postgresql+asyncpg://agent_admin:agent_admin@localhost:5432/agent_platform \
+  python scripts/init_db.py
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload   # 终端 1
 python -m app.execution.worker                            # 终端 2
@@ -470,7 +471,7 @@ GET    /v1/sandboxes                   沙箱列表
 
 ```bash
 docker compose up -d
-docker compose run --rm api python scripts/init_db.py
+docker compose --profile tools run --rm db-migrate
 ```
 
 **Compose 进程清单**：`api` · `worker×3` · `scheduler` · `sandbox-reaper` · `burn-monitor` · `billing-reporter` · `event-relay×2` · `audit-writer×2` · `risk-consumer` · Flink 三件套 · Postgres · Redis · MinIO · Kafka

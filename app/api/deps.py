@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models import TenantMember, Workspace, WorkspaceMember
-from app.infra.db import get_db, tenant_session
+from app.infra.db import get_db, set_tenant_context, tenant_session
 from app.infra.redis_client import get_redis
 from app.security.jwt_keys import verify
 from app.security.passwords import hash_password, verify_password
@@ -50,6 +50,7 @@ async def get_auth(request: Request,
     if claims.get("typ") != "access":
         raise HTTPException(401, "wrong token type")
 
+    await set_tenant_context(db, claims["tid"])
     r = await get_redis()
     if await r.exists(f"jwt:revoked:{claims['jti']}"):
         raise HTTPException(401, "token revoked")
@@ -74,6 +75,7 @@ async def get_auth_sse(token: str = Query(...), db: AsyncSession = Depends(get_d
         raise HTTPException(401, "invalid token")
     if claims.get("typ") != "access":
         raise HTTPException(401, "wrong token type")
+    await set_tenant_context(db, claims["tid"])
     r = await get_redis()
     if await r.exists(f"jwt:revoked:{claims['jti']}"):
         raise HTTPException(401, "token revoked")

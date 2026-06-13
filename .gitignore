@@ -16,6 +16,7 @@ build/
 .pytest_cache/
 .coverage
 htmlcov/
+.codegraph/
 
 # OS
 .DS_Store

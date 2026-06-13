@@ -1,6 +1,9 @@
+import socket
+
 import pytest
 
-from app.runtime.guardrails import GuardrailBlocked, check_command, check_url, scan_secrets
+from app.runtime.guardrails import (GuardrailBlocked, check_command, check_url,
+                                    check_url_resolved, scan_secrets)
 
 
 class TestDangerousCommands:
@@ -37,6 +40,34 @@ class TestSSRF:
 
     def test_public_allowed(self):
         check_url("https://api.github.com/repos")
+
+    @pytest.mark.parametrize("url", [
+        "http://[::1]/admin",
+        "http://2130706433/admin",
+        "http://0177.0.0.1/admin",
+    ])
+    def test_alternate_loopback_forms_blocked(self, url):
+        with pytest.raises(GuardrailBlocked):
+            check_url(url)
+
+    async def test_dns_resolution_to_private_address_blocked(self, monkeypatch):
+        async def fake_getaddrinfo(*args, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                     ("10.10.0.12", 443))]
+
+        monkeypatch.setattr(
+            "app.runtime.guardrails._getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(GuardrailBlocked, match="resolved to private"):
+            await check_url_resolved("https://safe-looking.example/data")
+
+    async def test_public_dns_resolution_allowed(self, monkeypatch):
+        async def fake_getaddrinfo(*args, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "",
+                     ("93.184.216.34", 443))]
+
+        monkeypatch.setattr(
+            "app.runtime.guardrails._getaddrinfo", fake_getaddrinfo)
+        await check_url_resolved("https://example.com/data")
 
 
 class TestSecretLeak:
