@@ -2,7 +2,7 @@ import asyncio, json
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
-from app.infra.db import SessionLocal
+from app.infra.db import SessionLocal, set_tenant_context
 from app.infra.redis_client import redis_client
 from app.api.deps import decode_token
 from app.domain.models import (TenantMember, Session, Message, Run,
@@ -21,6 +21,7 @@ async def websocket_endpoint(ws: WebSocket):
         user_id = decode_token(frame["token"])
         tenant_id = frame["tenant_id"]
         async with SessionLocal() as db:
+            await set_tenant_context(db, tenant_id)
             member = (await db.execute(select(TenantMember).where(
                 TenantMember.tenant_id == tenant_id,
                 TenantMember.user_id == user_id))).scalar_one_or_none()
@@ -55,6 +56,7 @@ async def websocket_endpoint(ws: WebSocket):
             t = frame.get("type")
             if t == "message.create":
                 async with SessionLocal() as db:
+                    await set_tenant_context(db, tenant_id)
                     sid = frame.get("session_id")
                     if sid:
                         s = await db.get(Session, sid)
@@ -85,6 +87,7 @@ async def websocket_endpoint(ws: WebSocket):
                     subscriptions[rid] = asyncio.create_task(forward_events(rid))
             elif t == "approval.decide" and member.role in ("owner", "admin"):
                 async with SessionLocal() as db:
+                    await set_tenant_context(db, tenant_id)
                     a = await db.get(ApprovalRequest, frame["approval_id"])
                     if a and a.tenant_id == tenant_id and \
                             a.status == ApprovalStatus.pending:

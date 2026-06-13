@@ -20,18 +20,29 @@ async def handle(entry_id, task, sem):
             await RunQueue.ack(entry_id)
             return
         keepalive = asyncio.create_task(_keepalive(lock))
+        handled = False
         try:
             outcome = await Runner(
                 task["tenant_id"], task["run_id"],
                 task.get("workspace_id", "")).execute(resume=bool(task.get("resume")))
+            handled = outcome in {
+                RunOutcome.COMPLETED, RunOutcome.FAILED,
+                RunOutcome.PAUSED, RunOutcome.CANCELLED,
+            }
             if outcome == RunOutcome.PAUSED:
                 log.info("run %s paused (normal exit)", task["run_id"])
         except Exception:
             log.exception("run %s crashed", task["run_id"])
         finally:
             keepalive.cancel()
+            try:
+                await keepalive
+            except asyncio.CancelledError:
+                pass
             await lock.release()
-            await RunQueue.ack(entry_id)
+            if handled:
+                await RunQueue.ack(entry_id)
+                await RunQueue.mark_consumed(task["run_id"])
 
 
 async def _keepalive(lock):

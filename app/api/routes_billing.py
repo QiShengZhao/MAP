@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from app.config import settings
+from app.infra import db as db_mod
 from app.infra.db import get_db
 from app.api.deps import get_auth, require_admin
 from app.domain.models import User, BillingAccount
@@ -113,7 +114,7 @@ async def validate_promo(code: str, auth=Depends(get_auth)):
             "duration": c.get("duration")}
 
 @router.post("/webhook", include_in_schema=False)
-async def stripe_webhook(request: Request, db=Depends(get_db)):
+async def stripe_webhook(request: Request):
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     try:
@@ -122,18 +123,20 @@ async def stripe_webhook(request: Request, db=Depends(get_db)):
     except Exception:
         raise HTTPException(400, "invalid signature")
     obj = event["data"]["object"]
-    if event["type"] in ("customer.subscription.created",
-                         "customer.subscription.updated",
-                         "customer.subscription.deleted"):
-        await BillingService.sync_subscription(db, obj)
-        await db.commit()
-    elif event["type"] == "invoice.payment_failed":
-        sub_id = obj.get("subscription")
-        if sub_id:
-            acc = (await db.execute(select(BillingAccount).where(
-                BillingAccount.base_subscription_id == sub_id
-            ))).scalar_one_or_none()
-            if acc:
-                await BillingService._apply_plan_quota(db, acc.tenant_id, "free")
-                await db.commit()
+    async with db_mod.session_factory() as db:
+        if event["type"] in ("customer.subscription.created",
+                             "customer.subscription.updated",
+                             "customer.subscription.deleted"):
+            await BillingService.sync_subscription(db, obj)
+            await db.commit()
+        elif event["type"] == "invoice.payment_failed":
+            sub_id = obj.get("subscription")
+            if sub_id:
+                acc = (await db.execute(select(BillingAccount).where(
+                    BillingAccount.base_subscription_id == sub_id
+                ))).scalar_one_or_none()
+                if acc:
+                    await BillingService._apply_plan_quota(
+                        db, acc.tenant_id, "free")
+                    await db.commit()
     return {"received": True}

@@ -15,6 +15,9 @@ SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=
 async def session_factory():
     """审计写入等后台任务使用的 service 级会话。"""
     async with SessionLocal() as session:
+        if session.bind and session.bind.dialect.name == "postgresql":
+            await session.execute(
+                text("SELECT set_config('app.is_service', 'true', true)"))
         yield session
 
 
@@ -26,10 +29,15 @@ async def get_db():
 async def tenant_session(tenant_id: str):
     """带 RLS 上下文的会话：DB 层兜底租户隔离"""
     async with SessionLocal() as session:
+        await set_tenant_context(session, tenant_id)
+        yield session
+
+
+async def set_tenant_context(session: AsyncSession, tenant_id: str) -> None:
+    if session.bind and session.bind.dialect.name == "postgresql":
         await session.execute(
             text("SELECT set_config('app.tenant_id', :tid, true)"),
             {"tid": tenant_id})
-        yield session
 
 RLS_SQL = """
 DO $$
@@ -40,11 +48,14 @@ BEGIN
     WHERE column_name = 'tenant_id' AND table_schema = 'public'
   LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t.table_name);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t.table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', t.table_name);
     EXECUTE format(
       'CREATE POLICY tenant_isolation ON %I USING '
       '(tenant_id = current_setting(''app.tenant_id'', true) '
-      ' OR current_setting(''app.tenant_id'', true) IS NULL)', t.table_name);
+      ' OR current_setting(''app.is_service'', true) = ''true'') '
+      'WITH CHECK (tenant_id = current_setting(''app.tenant_id'', true) '
+      ' OR current_setting(''app.is_service'', true) = ''true'')', t.table_name);
   END LOOP;
 END $$;
 """

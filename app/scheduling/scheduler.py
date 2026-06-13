@@ -38,6 +38,28 @@ async def expire_stale_approvals():
         await db.commit()
 
 
+async def recover_unqueued_runs(db=None) -> int:
+    """Re-dispatch queued runs that have no atomic Redis dispatch marker."""
+    owns_session = db is None
+    if owns_session:
+        ctx = db_mod.session_factory()
+        db = await ctx.__aenter__()
+    try:
+        rows = (await db.scalars(
+            select(Run).where(Run.status == RunStatus.queued)
+            .order_by(Run.created_at).limit(100))).all()
+        recovered = 0
+        for run in rows:
+            if await redis_client.exists(RunQueue.dispatch_key(str(run.id))):
+                continue
+            if await RunQueue.enqueue(str(run.tenant_id), str(run.id)):
+                recovered += 1
+        return recovered
+    finally:
+        if owns_session:
+            await ctx.__aexit__(None, None, None)
+
+
 async def _requeue_paused_run(run: Run) -> None:
     async with db_mod.session_factory() as db:
         try:
@@ -76,6 +98,9 @@ async def main():
         try:
             await recover_stuck_runs()
             await expire_stale_approvals()
+            recovered = await recover_unqueued_runs()
+            if recovered:
+                log.warning("re-dispatched %d queued runs", recovered)
         except Exception:
             log.exception("scheduler tick failed")
         await asyncio.sleep(60)
