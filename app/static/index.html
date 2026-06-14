@@ -1,36 +1,70 @@
 <!DOCTYPE html>
 <html lang="zh"><head>
-<meta charset="utf-8"><title>Agent Platform Console</title>
+<meta charset="utf-8"><title>MAP Console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d12">
 <link rel="stylesheet" href="/css/console.css">
 </head><body>
 
 <!-- ═══ 登录 ═══ -->
 <div id="login">
-  <h1>Agent Platform</h1>
-  <input id="loginEmail" placeholder="email" autocomplete="username">
-  <input id="loginPwd" type="password" placeholder="password" autocomplete="current-password">
-  <div class="row">
-    <button onclick="Auth.login()">登录</button>
-    <button class="ghost" onclick="Auth.register()">注册租户</button>
+  <div class="login-shell">
+    <section class="login-intro">
+      <div class="brand-mark" aria-hidden="true">M</div>
+      <p class="eyebrow">Multi-Agent Platform</p>
+      <h1>让智能体工作<br>保持清晰可控</h1>
+      <p class="login-copy">统一管理对话、运行、风险策略与成本，在一个工作台里观察每次执行。</p>
+      <div class="login-features">
+        <span><i></i>实时运行追踪</span>
+        <span><i></i>租户级安全隔离</span>
+        <span><i></i>预算与风险控制</span>
+      </div>
+    </section>
+    <section class="login-card">
+      <div class="login-card-head">
+        <p class="eyebrow">Welcome back</p>
+        <h2>登录控制台</h2>
+        <p>使用你的组织账号继续</p>
+      </div>
+      <label class="login-field">
+        <span>邮箱</span>
+        <input id="loginEmail" type="email" placeholder="name@company.com" autocomplete="username">
+      </label>
+      <label class="login-field">
+        <span>密码</span>
+        <input id="loginPwd" type="password" placeholder="输入密码" autocomplete="current-password">
+      </label>
+      <div id="loginErr" class="err-text"></div>
+      <button class="login-primary" onclick="Auth.login()">登录</button>
+      <div class="login-divider"><span>或</span></div>
+      <button class="ghost login-secondary" onclick="Auth.register()">创建新租户</button>
+    </section>
   </div>
-  <div id="loginErr" class="err-text"></div>
 </div>
 
 <!-- ═══ Header + 主导航 ═══ -->
 <header class="hidden">
-  <h1>⚙️ Agent Console</h1>
+  <a class="app-brand" href="#/chat" aria-label="MAP Console 首页">
+    <span class="brand-mark small">M</span>
+    <span><b>MAP</b><small>Console</small></span>
+  </a>
   <nav id="mainNav">
-    <a href="#/chat" data-view="chat">💬 对话</a>
-    <a href="#/ops/runs" data-view="ops" class="admin-only">⚙️ 运维</a>
-    <a href="#/risk/rules" data-view="risk" class="admin-only">🛡️ 风控</a>
-    <a href="#/config/policy" data-view="config">🔧 配置</a>
+    <a href="#/chat" data-view="chat"><span>对话</span></a>
+    <a href="#/ops/runs" data-view="ops" class="admin-only"><span>运维</span></a>
+    <a href="#/risk/rules" data-view="risk" class="admin-only"><span>风控</span></a>
+    <a href="#/config/policy" data-view="config"><span>配置</span></a>
   </nav>
-  <select id="wsSel" onchange="Chat.onWorkspaceChange()"></select>
-  <span id="runBadge" class="badge">idle</span>
   <div class="spacer"></div>
-  <span id="who" class="dim"></span>
-  <button class="ghost" onclick="Auth.logout()">退出</button>
+  <label class="workspace-picker">
+    <span>工作区</span>
+    <select id="wsSel" aria-label="选择工作区" onchange="Chat.onWorkspaceChange()"></select>
+  </label>
+  <span id="runBadge" class="badge">idle</span>
+  <div class="account">
+    <span class="account-avatar" aria-hidden="true"></span>
+    <span id="who" class="dim"></span>
+    <button class="icon-btn" aria-label="退出登录" title="退出登录" onclick="Auth.logout()">↗</button>
+  </div>
 </header>
 
 <!-- ═══ 全局 banner（租户暂停 / 预算）═══ -->
@@ -42,25 +76,52 @@
   <!-- 对话页（默认） -->
   <div id="view-chat" class="view">
     <div class="col" id="sessCol">
-      <h3>Sessions <button class="ghost mini" onclick="Chat.newSession()">+</button></h3>
+      <div class="panel-head">
+        <div><span class="eyebrow">Workspace</span><h3>会话记录</h3></div>
+        <button class="icon-btn primary" aria-label="新建会话" title="新建会话" onclick="Chat.newSession()">+</button>
+      </div>
       <div id="sessList"></div>
     </div>
     <div id="chatMain">
-      <div id="msgs"></div>
+      <div class="chat-titlebar">
+        <div>
+          <span class="eyebrow">Agent workspace</span>
+          <h2>智能体对话</h2>
+        </div>
+        <span class="live-indicator"><i></i>系统就绪</span>
+      </div>
+      <div id="msgs">
+        <div class="chat-empty">
+          <div class="empty-orb"><span>✦</span></div>
+          <p class="eyebrow">New session</p>
+          <h2>今天想完成什么？</h2>
+          <p>描述目标，智能体会规划步骤、调用工具，并实时汇报执行过程。</p>
+          <div class="prompt-hints">
+            <button onclick="document.getElementById('input').value='分析当前项目的主要风险并给出修复建议'">分析项目风险</button>
+            <button onclick="document.getElementById('input').value='帮我整理本周的工作进展'">整理工作进展</button>
+          </div>
+        </div>
+      </div>
       <div id="composer">
-        <textarea id="input" placeholder="输入任务… (Ctrl+Enter 发送)"></textarea>
-        <div class="btn-col">
-          <button id="sendBtn" onclick="Chat.send()">发送</button>
-          <button id="btnPause" class="ghost admin-only hidden" onclick="Chat.pauseRun()">⏸ 暂停</button>
-          <button id="btnResume" class="ghost admin-only hidden" onclick="Chat.resumeRun()">▶ 恢复</button>
-          <button id="btnCancel" class="danger hidden" onclick="Chat.cancelRun()">终止</button>
+        <div class="composer-box">
+          <textarea id="input" aria-label="输入任务" placeholder="给智能体安排一个任务…"></textarea>
+          <div class="composer-actions">
+            <span class="composer-tip">Ctrl + Enter 发送</span>
+            <div class="row">
+              <button id="btnPause" class="ghost admin-only hidden" onclick="Chat.pauseRun()">暂停</button>
+              <button id="btnResume" class="ghost admin-only hidden" onclick="Chat.resumeRun()">恢复</button>
+              <button id="btnCancel" class="danger hidden" onclick="Chat.cancelRun()">终止</button>
+              <button id="sendBtn" class="send-btn" onclick="Chat.send()">发送 <span>↑</span></button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
     <div class="col side">
-      <section><h3>用量 / 预算</h3><div id="usage"></div></section>
-      <section><h3>产物 Artifacts</h3><div id="artifacts"></div></section>
-      <section><h3>待审批</h3><div id="approvals"></div></section>
+      <div class="panel-head side-head"><div><span class="eyebrow">Run context</span><h3>执行概览</h3></div></div>
+      <section><h3><span class="section-dot usage-dot"></span>用量与预算</h3><div id="usage"></div></section>
+      <section><h3><span class="section-dot artifact-dot"></span>产物</h3><div id="artifacts"></div></section>
+      <section><h3><span class="section-dot approval-dot"></span>待审批</h3><div id="approvals"></div></section>
     </div>
   </div>
 
