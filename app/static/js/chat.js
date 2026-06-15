@@ -1,9 +1,14 @@
 /* === 对话页：会话 / SSE / Run 控制 / 审批 / 侧栏 === */
 const Chat = (() => {
   let asstEl = null, curApproval = null, sidePoll = null;
+  let followLatest = true;
 
   function init() {
     $('input').addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') send(); });
+    $('msgs').addEventListener('scroll', () => {
+      const box = $('msgs');
+      followLatest = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    }, {passive: true});
     loadSessions();
     pollSide();
     if (sidePoll) clearInterval(sidePoll);
@@ -258,7 +263,7 @@ const Chat = (() => {
     $('msgs').classList.add('has-content');
     const d = el('div', {class: 'msg ' + role}, text);
     $('msgs').appendChild(d);
-    scroll_();
+    scroll_(role === 'user');
     return d;
   }
 
@@ -287,12 +292,18 @@ const Chat = (() => {
     d.querySelector('pre').textContent += `\n── result ──\n${(p.output || '').slice(0, 2000)}`;
   }
 
-  function scroll_() { $('msgs').scrollTop = $('msgs').scrollHeight; }
+  function scroll_(force = false) {
+    if (!force && !followLatest) return;
+    const box = $('msgs');
+    box.scrollTop = box.scrollHeight;
+    followLatest = true;
+  }
 
   function resetMessages() {
     const empty = document.querySelector('.chat-empty');
     $('msgs').innerHTML = '';
     $('msgs').classList.remove('has-content');
+    followLatest = true;
     if (empty) $('msgs').appendChild(empty);
   }
 
