@@ -12,7 +12,7 @@ from app.api import (routes_auth, routes_workspace, routes_run, routes_stream,
                      routes_approval, routes_artifact, routes_usage,
                      routes_skill, routes_agent, routes_policy,
                      routes_sandbox, routes_admin, routes_billing,
-                     routes_risk, routes_internal, routes_ws)
+                     routes_risk, routes_internal, routes_ws, routes_memory)
 
 
 @asynccontextmanager
@@ -46,7 +46,8 @@ app.add_middleware(
 for r in (routes_auth, routes_workspace, routes_run, routes_stream,
           routes_approval, routes_artifact, routes_usage, routes_skill,
           routes_agent, routes_policy, routes_sandbox, routes_admin,
-          routes_billing, routes_risk, routes_internal, routes_ws):
+          routes_billing, routes_risk, routes_internal, routes_ws,
+          routes_memory):
     app.include_router(r.router)
 
 @app.get("/healthz")

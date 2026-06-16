@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.config import settings
 from app.domain.models import (ApprovalRequest, ApprovalStatus, Message, Run,
@@ -24,6 +24,7 @@ from app.runtime.model_router import ModelRouter
 from app.runtime.sandbox import SandboxManager
 from app.runtime.state import StateService, load_checkpoint, save_checkpoint, Checkpoint
 from app.runtime.tools import ToolContext, ToolRegistry
+from app.memory.service import MemoryService
 
 log = logging.getLogger("runner")
 
@@ -74,6 +75,10 @@ class Runner:
         await redis_client.publish(
             f"tenant:{self.tenant_id}:run:{self.run_id}:events", legacy)
 
+    async def _load_event_seq(self, db) -> int:
+        return await db.scalar(select(func.coalesce(func.max(RunEvent.seq), 0))
+                               .where(RunEvent.run_id == self.run_id)) or 0
+
     async def _check_cancel(self):
         if await redis_client.get(f"cancel:run:{self.run_id}"):
             raise RunCancelled()
@@ -90,6 +95,7 @@ class Runner:
                     run = await db.get(Run, self.run_id)
                     if not run:
                         return RunOutcome.FAILED
+                    self.seq = await self._load_event_seq(db)
                     if run.status not in (RunStatus.queued, RunStatus.running,
                                           RunStatus.paused):
                         return run.status.value
@@ -317,7 +323,8 @@ class Runner:
             if not approved:
                 return json.dumps({"error": "rejected or expired by approver"})
         ctx = ToolContext(tenant_id=self.tenant_id, run_id=self.run_id,
-                          session_id=run.session_id, db=db, emit=self.emit, usage=usage)
+                          session_id=run.session_id, db=db, emit=self.emit, usage=usage,
+                          workspace_id=self.workspace_id, user_id=run.user_id)
         with tracer.start_as_current_span(f"tool.{call.name}"):
             output = await tools.execute(ctx, call)
         usage.add_tool_call(call.name)
@@ -407,9 +414,36 @@ class Runner:
         return json.dumps({"error": "sub-agent max turns exceeded"})
 
     async def _finish(self, db, run, content, usage):
-        db.add(Message(tenant_id=self.tenant_id, session_id=run.session_id,
-                       run_id=self.run_id, role="assistant",
-                       content={"text": content}))
+        msg = Message(tenant_id=self.tenant_id, session_id=run.session_id,
+                      run_id=self.run_id, role="assistant",
+                      content={"text": content})
+        db.add(msg)
+        await db.flush()
+        rows = (await db.execute(select(Message)
+            .where(Message.session_id == run.session_id)
+            .order_by(Message.created_at))).scalars().all()
+        await MemoryService.update_session_summary(
+            db,
+            tenant_id=self.tenant_id,
+            workspace_id=self.workspace_id,
+            session_id=run.session_id,
+            messages=[
+                {"id": m.id, "role": m.role, "content": m.content}
+                for m in rows if m.role in ("user", "assistant")
+            ],
+        )
+        await MemoryService.capture_candidates(
+            db,
+            tenant_id=self.tenant_id,
+            workspace_id=self.workspace_id,
+            session_id=run.session_id,
+            run_id=self.run_id,
+            user_id=run.user_id,
+            messages=[
+                {"id": m.id, "role": m.role, "content": m.content}
+                for m in rows[-6:]
+            ],
+        )
         try:
             await transition(db, self.run_id, run.status.value, "completed",
                              reason="done", commit=False)
@@ -435,6 +469,8 @@ class Runner:
         system = DEFAULT_SYSTEM_PROMPT + "\n" + agent.instructions
         if run.agent_config.get("system_prompt"):
             system += "\n" + run.agent_config["system_prompt"]
+        summary = await MemoryService.get_session_summary(
+            db, tenant_id=self.tenant_id, session_id=run.session_id)
         for s in skills:
             system += f"\n\n## Skill: {s.name}\n{s.instructions}"
         rows = (await db.execute(select(Message)
@@ -442,4 +478,18 @@ class Runner:
             .order_by(Message.created_at.desc()).limit(40))).scalars().all()
         msgs = [{"role": m.role, "content": m.content.get("text", "")}
                 for m in reversed(rows) if m.role in ("user", "assistant")]
+        query = "\n".join(m["content"] for m in msgs[-4:])
+        memories = await MemoryService.search(
+            db,
+            tenant_id=self.tenant_id,
+            workspace_id=self.workspace_id,
+            session_id=run.session_id,
+            run_id=self.run_id,
+            user_id=run.user_id,
+            query=query,
+            limit=8,
+        )
+        memory_block = MemoryService.format_for_prompt(memories, summary)
+        if memory_block:
+            system += "\n\n" + memory_block
         return [{"role": "system", "content": system}] + msgs

@@ -9,6 +9,10 @@ from app.domain.models import RunState
 CHECKPOINT_SCHEMA_VERSION = 2
 
 
+def utcnow_naive() -> datetime:
+    return datetime.utcnow()
+
+
 class Checkpoint:
     def __init__(self, run_id: str, tenant_id: str, data: dict, version: int = 0):
         self.run_id, self.tenant_id, self.data, self.version = run_id, tenant_id, data, version
@@ -28,7 +32,7 @@ async def save_checkpoint(db: AsyncSession, cp: Checkpoint, *, commit: bool = Tr
     row.turn = cp.data.get("iteration", cp.data.get("turn", 0))
     row.history = cp.data.get("messages", cp.data.get("history", []))
     row.pending_tool_call = cp.data.get("pending_approval")
-    row.updated_at = datetime.now(timezone.utc)
+    row.updated_at = utcnow_naive()
     await db.flush()
     if commit:
         await db.commit()
