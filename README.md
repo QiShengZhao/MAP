@@ -9,7 +9,7 @@
 [![CI](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml/badge.svg)](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml)
 [![Kubernetes](https://img.shields.io/badge/K8s-gVisor-326CE5.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-56%20passed-0A9EDC.svg)]()
+[![Tests](https://img.shields.io/badge/tests-91%20passed-0A9EDC.svg)]()
 
 > 模型只做决策 · 动作经 Tools · 高风险审批 · 沙箱执行 · 全程可观测 · 资源可计量
 
@@ -35,6 +35,7 @@
 | 模型成本失控 | 三级预算硬熔断 + EWMA 烧钱预测 + 成本选路 |
 | 出问题无法追溯 | RunEvent 全链路审计 + OTel Tracing + 审计回放 |
 | 长任务崩溃丢进度 | RunState 检查点 + 崩溃续跑 + pause/resume |
+| Agent 无长期记忆 | 会话摘要 + 分级长期记忆 + 检索注入 + memory 工具 |
 
 ---
 
@@ -109,7 +110,7 @@
 | ⑤ | 模型推理 | 成本评分选路 → 熔断 failover → 流式 delta | `app/runtime/model_router.py` |
 | ⑥ | ToolCall 守卫 | AST 危险命令 + SSRF + 租户策略 + 预算预占 | `app/runtime/guardrails.py` |
 | ⑦ | 审批/沙箱执行 | HITL 阻塞 + gVisor Pod exec（容器复用） | `app/runtime/sandbox.py` |
-| ⑧ | 结果回填 | Message 落库 + Artifact 上传 + Usage 结算 + 事件广播 | `app/execution/runner.py` |
+| ⑧ | 结果回填 | Message 落库 + 摘要/记忆写入 + Artifact + Usage + 事件广播 | `app/execution/runner.py` |
 
 ---
 
@@ -135,6 +136,19 @@
 - Handoff 栈式交接
 - Agents-as-Tools 子代理
 - 检查点崩溃续跑 + pause/resume
+
+### 🧠 Agent 记忆
+- `session_summaries` 滚动会话摘要
+- `memory_items` 四级作用域：`user` / `workspace` / `session` / `run`
+- Runner 自动注入摘要 + 检索记忆
+- 工具：`memory_search` · `memory_write` · `memory_update` · `memory_forget`
+- REST：`/v1/memories` CRUD + 关键词检索（embedding 可选）
+
+### 📚 Skill 目录与导入
+- 内置精选目录（OpenAI / Anthropic 官方 Skill）
+- HTTPS `SKILL.md` 安全拉取 + frontmatter 解析
+- 预览后安装，同名冲突 HTTP 409
+- 控制台配置页一键安装
 
 </td><td width="50%" valign="top">
 
@@ -253,7 +267,7 @@ docker compose --profile tools run --rm db-migrate
 2. 登录（多租户时选择租户）→ 选择工作区 → 输入任务 → Ctrl+Enter 发送
 3. (admin) 风控页：规则 CRUD / dry-run / 暂停管理
    运维页：Run 列表 / 审计时间线 / 模型路由 / 沙箱
-   配置页：Policy / Agents / Skills / Billing
+   配置页：Policy / Agents / Skills（目录安装）/ Billing
 ```
 
 ### 本地开发（Python 热重载）
@@ -276,13 +290,14 @@ python -m app.scheduling.scheduler                        # 终端 3
 ### 数据库迁移
 
 ```bash
-alembic current                    # 当前版本（初始：0001）
-alembic history
+alembic current                    # 当前 head：0003
+alembic history                    # 0001 初始 schema → 0002 RLS → 0003 记忆表
 alembic revision --autogenerate -m "describe change"
 alembic upgrade head
 ```
 
 > 迁移使用同步 `psycopg2`；应用运行时仍用 `asyncpg`，`DATABASE_URL` 在 `alembic/env.py` 中自动转换。
+> 生产环境需为运行时角色执行 `deploy/postgres-init.sql`（CI 与 compose 已包含）；可用 `python scripts/check_rls.py` 验证 RLS 不可绕过。
 
 ---
 
@@ -312,6 +327,7 @@ MAP/
 │   │   ├── routes_ws.py           #   WebSocket
 │   │   ├── routes_approval.py · routes_artifact.py · routes_usage.py
 │   │   ├── routes_skill.py · routes_agent.py · routes_policy.py
+│   │   ├── routes_memory.py       #   长期记忆 CRUD + 检索
 │   │   ├── routes_sandbox.py · routes_billing.py
 │   │   ├── routes_admin.py        #   Run 监控/审计回放/路由观测
 │   │   ├── routes_risk.py         #   规则 CRUD + dry-run + 暂停管理
@@ -353,6 +369,13 @@ MAP/
 │   │   ├── expression.py          #   AST 白名单 DSL
 │   │   └── engine.py              #   热更新/cooldown/动作执行
 │   │
+│   ├── memory/                    # Agent 记忆
+│   │   └── service.py             #   摘要 / 检索 / 写入 / 软删除
+│   │
+│   ├── skills/                    # Skill 目录与导入
+│   │   ├── catalog.py             #   精选目录
+│   │   └── importer.py            #   HTTPS SKILL.md 安全拉取
+│   │
 │   ├── platform_services/         # 平台服务层
 │   │   ├── policy.py · usage.py · artifact_service.py
 │   │   ├── billing.py · billing_reporter.py · seats.py
@@ -372,13 +395,16 @@ MAP/
 │
 ├── alembic/                       # 数据库迁移
 │   ├── env.py
-│   └── versions/20250611_0001_initial_schema.py
+│   └── versions/
+│       ├── 20250611_0001_initial_schema.py
+│       ├── 20260614_0002_force_tenant_rls.py
+│       └── 20260616_0003_agent_memory.py
 ├── sidecar/watcher.py             # Artifact 自动上传 + 回调
 ├── browser/Dockerfile             # Headless Chromium
 ├── sandbox/Dockerfile             # 沙箱主镜像
 ├── flink/ (Dockerfile · risk_job.py)
-├── scripts/ (init_db.py · init_stripe.py)
-├── deploy/ (k8s.yaml · gvisor-runtimeclass.yaml)
+├── scripts/ (init_db.py · init_stripe.py · check_rls.py)
+├── deploy/ (k8s.yaml · gvisor-runtimeclass.yaml · postgres-init.sql)
 ├── tests/                         # pytest + fakeredis + aiosqlite
 ├── docker-compose.yml
 ├── requirements.txt · requirements-dev.txt
@@ -451,6 +477,35 @@ POST   /v1/risk/runs/{id}/resume       恢复 Run
 </details>
 
 <details>
+<summary><b>记忆</b></summary>
+
+```http
+GET    /v1/memories                    检索（workspace_id / session_id / query / scope）
+POST   /v1/memories                    创建记忆
+PATCH  /v1/memories/{id}               更新
+DELETE /v1/memories/{id}               软删除
+```
+
+作用域 `scope`：`user` · `workspace` · `session` · `run`。Agent 侧可用 `memory_search` / `memory_write` 等工具。
+
+</details>
+
+<details>
+<summary><b>Skills（admin 安装）</b></summary>
+
+```http
+GET    /v1/skills                      租户已安装列表
+POST   /v1/skills                      手动创建
+GET    /v1/skills/catalog              精选目录（含 installed 标记）
+POST   /v1/skills/import/preview       预览远程 SKILL.md
+POST   /v1/skills/import               安装（catalog_id 或 url，二选一）
+PUT    /v1/skills/{id}                 更新
+DELETE /v1/skills/{id}                 删除
+```
+
+</details>
+
+<details>
 <summary><b>运维（admin）</b></summary>
 
 ```http
@@ -490,11 +545,24 @@ kubectl apply -f deploy/k8s.yaml
 ## 🧪 测试
 
 ```bash
-pip install -r requirements-dev.txt
-pytest tests/ -q --no-cov              # 56 项，fakeredis + aiosqlite，无需外部依赖
+pip install -r requirements.txt -r requirements-dev.txt
+pytest tests/ -q --no-cov              # 91 项，fakeredis + aiosqlite，无需外部依赖
+pytest tests/ -q --cov=app --cov-fail-under=40   # 与 CI 一致
 docker compose --profile test run --rm tests
 pytest --cov=app --cov-report=html     # 覆盖率报告
 ```
+
+### CI/CD 流水线
+
+`main` 与 `codex/**` 分支 push / PR 触发 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)：
+
+| Job | 说明 |
+|---|---|
+| **pytest** | 单元测试 + 覆盖率 ≥40% |
+| **PostgreSQL RLS** | 迁移 + `scripts/check_rls.py` 租户隔离校验 |
+| **compose smoke** | `docker compose` 启动 + `/healthz` |
+| **Container image** | Docker 镜像构建 |
+| **Publish GHCR** | 仅 `main` push：发布至 `ghcr.io/<repo>` |
 
 **核心测试矩阵**：
 
@@ -511,6 +579,13 @@ pytest --cov=app --cov-report=html     # 覆盖率报告
 | `test_model_router.py` | ε-greedy 探索 + 熔断 failover |
 | `test_auth_security.py` | 锁定 / refresh rotation / token 类型校验 |
 | `test_api_auth.py` | 注册登录流程 |
+| `test_memory_service.py` · `test_memory_api_tools.py` · `test_runner_memory.py` | 记忆写入/检索/Runner 注入 |
+| `test_skill_catalog.py` | 目录 + HTTPS 导入安全校验 |
+| `test_queue_reliability.py` · `test_runner_reliability.py` | 队列接管 / Worker 可靠性 |
+| `test_billing_reliability.py` · `test_security_regressions.py` | 计费上报 / 安全回归 |
+| `test_db_security.py` | RLS 策略存在性 |
+
+设计文档见 [`docs/superpowers/specs/`](docs/superpowers/specs/)（记忆架构、Skill 目录、控制台 UI）。
 
 ---
 
@@ -545,13 +620,17 @@ pytest --cov=app --cov-report=html     # 覆盖率报告
 | 先落检查点再改状态 | 状态=paused 即承诺检查点可用 |
 | `PAUSED` 是 Worker 正常出口 | 不进 DLQ、不污染失败率统计 |
 | Alembic 管理 schema | 可版本化升级，替代裸 `create_all` |
+| 记忆关键词检索优先、embedding 可选 | 无向量依赖也能跑通；有 OpenAI 配置时自动增强 |
+| Skill 导入仅 HTTPS + SSRF 防护 | 远程 Markdown 只作 instructions 存储，导入器不执行 |
 | 一切带灰度开关 | 出问题可独立回退 |
 
 ---
 
 ## 🗺 Roadmap
 
-- [x] GitHub Actions CI（pytest + compose 冒烟）
+- [x] GitHub Actions CI（pytest + RLS 校验 + compose 冒烟 + GHCR 发布）
+- [x] Agent 长期记忆（摘要 + memory_items + 工具 + API）
+- [x] Skill 精选目录与安全 URL 导入
 - [ ] pause/resume 端到端集成测试
 - [ ] 工具幂等缓存（resume 不重放已执行 tool call）
 - [ ] 平台级风控规则（`is_platform_admin`）
@@ -583,7 +662,7 @@ docker compose logs -f risk-consumer flink-jobmanager
 
 欢迎 Issue / PR。提交前请确保：
 
-1. ✅ `pytest tests/ -q --no-cov` 全绿
+1. ✅ `pytest tests/ -q --cov=app --cov-fail-under=40` 全绿（或 `--no-cov` 快速本地跑）
 2. ✅ 重大功能附带**灰度开关**
 3. ✅ 数据模型变更附 **Alembic 迁移**
 4. ✅ 安全相关变更附**测试用例**
