@@ -4,10 +4,12 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import select, update
 
+from app.config import settings
 from app.domain.models import ApprovalRequest, ApprovalStatus, Run, RunStatus
 from app.execution.run_statemachine import InvalidTransition, StaleTransition, transition
 from app.infra import db as db_mod
 from app.infra.redis_client import get_redis, redis_client
+from app.platform_services.notifications import send_webhook
 from app.scheduling.queue import RunQueue
 
 log = logging.getLogger("scheduler")
@@ -70,6 +72,51 @@ async def _requeue_paused_run(run: Run) -> None:
     log.info("run %s requeued for resume", run.id)
 
 
+async def cancel_stale_paused_runs() -> int:
+    """Paused 超过 PAUSED_RUN_MAX_DAYS 的 Run 自动 cancel 并通知。"""
+    days = settings.PAUSED_RUN_MAX_DAYS
+    if days <= 0:
+        return 0
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    cancelled = 0
+    async with db_mod.session_factory() as db:
+        rows = (await db.scalars(
+            select(Run).where(
+                Run.status == RunStatus.paused,
+                Run.paused_at.is_not(None),
+                Run.paused_at < cutoff,
+            ).limit(100))).all()
+        for run in rows:
+            try:
+                await transition(db, str(run.id), "paused", "cancelled",
+                                 reason=f"auto-cancel: paused>{days}d", commit=False)
+            except (StaleTransition, InvalidTransition):
+                continue
+            run.finished_at = datetime.utcnow()
+            run.error = f"paused run auto-cancelled after {days} days"
+            cancelled += 1
+            await send_webhook({
+                "event": "run.paused_stale_cancelled",
+                "tenant_id": str(run.tenant_id),
+                "run_id": str(run.id),
+                "paused_at": run.paused_at.isoformat() if run.paused_at else None,
+                "max_days": days,
+            })
+        if cancelled:
+            await db.commit()
+            log.info("auto-cancelled %d stale paused runs", cancelled)
+    return cancelled
+
+
+async def stale_paused_scanner_loop():
+    while True:
+        try:
+            await cancel_stale_paused_runs()
+        except Exception:
+            log.exception("stale paused scanner error")
+        await asyncio.sleep(3600)
+
+
 async def resume_scanner_loop():
     """每 30s：paused 且租户/Run 未再被暂停 → 重新入队。"""
     while True:
@@ -94,6 +141,7 @@ async def main():
     logging.basicConfig(level=logging.INFO)
     await RunQueue.ensure_group()
     asyncio.create_task(resume_scanner_loop())
+    asyncio.create_task(stale_paused_scanner_loop())
     while True:
         try:
             await recover_stuck_runs()

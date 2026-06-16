@@ -54,6 +54,7 @@ class Runner:
         self.pause_ctl: PauseController | None = None
         self._pending_approval = None
         self._loop_ctx: dict = {}
+        self._tool_results: dict[str, str] = {}
 
     async def emit(self, db, type_, payload):
         from app.eventbus.bus import build_run_event, publish_run_event
@@ -205,6 +206,7 @@ class Runner:
                                           history=history, seq=self.seq,
                                           usage_partial=usage.snapshot(),
                                           pending_tool_call=self._pending_approval,
+                                          tool_results=self._tool_results,
                                           commit=False)
             await db.commit()
             paused_from = "running"
@@ -247,6 +249,8 @@ class Runner:
             history.append(result.as_message())
             for call in result.tool_calls:
                 await self._check_cancel()
+                if self._history_has_tool_result(history, call.id):
+                    continue
                 target = agents.parse_handoff(call.name)
                 if target:
                     current = agents.get(target)
@@ -274,6 +278,7 @@ class Runner:
             "current_agent": current.name, "iteration": turn, "turn": turn,
             "seq": self.seq, "usage_partial": usage.snapshot(),
             "pending_approval": self._pending_approval, "paused_from": paused_from,
+            "tool_results": self._tool_results,
         }, version=0)
         existing = await load_checkpoint(db, self.run_id)
         if existing:
@@ -305,10 +310,24 @@ class Runner:
         if partial:
             usage.restore(partial)
         self._pending_approval = d.get("pending_approval")
+        self._tool_results = dict(d.get("tool_results") or {})
         await self.emit(db, "run.resumed", {"iteration": turn})
         return current, turn, history
 
+    @staticmethod
+    def _history_has_tool_result(history: list, tool_call_id: str) -> bool:
+        for msg in history:
+            if msg.get("role") == "tool" and msg.get("tool_call_id") == tool_call_id:
+                return True
+        return False
+
     async def _execute_tool(self, db, run, tools, policy, usage, call) -> str:
+        if call.id in self._tool_results:
+            output = self._tool_results[call.id]
+            await self.emit(db, "tool.result", {
+                "id": call.id, "name": call.name, "output": output[:4000], "cached": True,
+            })
+            return output
         await self.emit(db, "tool.call", {"id": call.id, "name": call.name, "args": call.args})
         try:
             await Guardrails.check_tool_call(policy, call)
@@ -327,6 +346,7 @@ class Runner:
                           workspace_id=self.workspace_id, user_id=run.user_id)
         with tracer.start_as_current_span(f"tool.{call.name}"):
             output = await tools.execute(ctx, call)
+        self._tool_results[call.id] = output
         usage.add_tool_call(call.name)
         await self.emit(db, "tool.result", {"id": call.id, "name": call.name,
                                             "output": output[:4000]})

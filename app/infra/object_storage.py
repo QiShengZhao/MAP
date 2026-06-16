@@ -22,6 +22,15 @@ class ObjectStorage:
     def make_key(tenant_id, run_id, name):
         return f"tenants/{tenant_id}/runs/{run_id}/{name}"
 
+    async def get(self, key: str) -> bytes:
+        async with self._client() as s3:
+            resp = await s3.get_object(Bucket=settings.S3_BUCKET, Key=key)
+            return await resp["Body"].read()
+
+    @staticmethod
+    def checkpoint_key(tenant_id: str, run_id: str, version: int) -> str:
+        return f"tenants/{tenant_id}/checkpoints/{run_id}/v{version}.json"
+
     async def put(self, key, data, mime="application/octet-stream"):
         async with self._client() as s3:
             await s3.put_object(Bucket=settings.S3_BUCKET, Key=key,

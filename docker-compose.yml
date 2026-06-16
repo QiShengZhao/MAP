@@ -116,14 +116,14 @@ services:
     depends_on: [kafka, redis, postgres]
   flink-jobmanager:
     build: { context: ., dockerfile: flink/Dockerfile }
+    entrypoint: ["/opt/flink/configure-flink.sh"]
     command: jobmanager
     ports: ["8082:8081"]
     environment:
+      FLINK_CHECKPOINT_URI: ${FLINK_CHECKPOINT_URI:-file:///opt/flink/checkpoints}
+      FLINK_DEPLOYMENT_TARGET: ${FLINK_DEPLOYMENT_TARGET:-local}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
-        state.backend: hashmap
-        state.checkpoints.dir: file:///opt/flink/checkpoints
-        execution.checkpointing.interval: 30s
         restart-strategy.type: exponential-delay
         restart-strategy.exponential-delay.max-backoff: 60s
     volumes:
@@ -136,8 +136,10 @@ services:
       retries: 12
   flink-taskmanager:
     build: { context: ., dockerfile: flink/Dockerfile }
+    entrypoint: ["/opt/flink/configure-flink.sh"]
     command: taskmanager
     environment:
+      FLINK_CHECKPOINT_URI: ${FLINK_CHECKPOINT_URI:-file:///opt/flink/checkpoints}
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
@@ -159,11 +161,20 @@ services:
            | grep -q '"name":"risk-metric-aggregation".*"state":"RUNNING"'; then
           echo "job already running, skip submit"; exit 0
         fi
-        flink run --detached \
-          --jobmanager flink-jobmanager:8081 \
-          --python /opt/jobs/risk_job.py \
-          -- --kafka-bootstrap kafka:29092 --source-topic run-events-json
-        echo "risk job submitted"
+        TARGET="${FLINK_DEPLOYMENT_TARGET:-local}"
+        if [ "$TARGET" = "application" ]; then
+          flink run-application -t local \
+            --detached \
+            --jobmanager flink-jobmanager:8081 \
+            --python /opt/jobs/risk_job.py \
+            -- --kafka-bootstrap kafka:29092 --source-topic run-events-json
+        else
+          flink run --detached \
+            --jobmanager flink-jobmanager:8081 \
+            --python /opt/jobs/risk_job.py \
+            -- --kafka-bootstrap kafka:29092 --source-topic run-events-json
+        fi
+        echo "risk job submitted (target=$TARGET)"
     restart: "no"
   tests:
     build: .

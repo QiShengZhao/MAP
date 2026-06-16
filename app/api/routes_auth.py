@@ -84,6 +84,17 @@ def _slugify(name: str) -> str:
     return s or f"org-{uuid.uuid4().hex[:8]}"
 
 
+class SwitchTenantIn(BaseModel):
+    tenant_id: str
+
+
+def _platform_admin_emails() -> set[str]:
+    raw = settings.PLATFORM_ADMIN_EMAILS.strip()
+    if not raw:
+        return set()
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
 @router.post("/register", status_code=201, dependencies=[Depends(rl_register)])
 async def register(body: RegisterIn):
     tenant_name = body.tenant_name or body.email.split("@")[0]
@@ -91,7 +102,8 @@ async def register(body: RegisterIn):
         if await db.scalar(select(User).where(User.email == body.email)):
             raise HTTPException(409, "email already registered")
         user = User(email=body.email, password_hash=hash_password(body.password),
-                    display_name=body.display_name)
+                    display_name=body.display_name,
+                    is_platform_admin=body.email.lower() in _platform_admin_emails())
         slug = _slugify(tenant_name)
         tenant = Tenant(name=tenant_name, slug=slug, plan="free")
         db.add_all([user, tenant])
@@ -139,8 +151,10 @@ async def login(body: LoginIn, request: Request):
             member, tenant = members[0][0], members[0][1]
 
     await r.delete(lock_key)
-    access = issue_access(str(user.id), str(member.tenant_id), member.role)
-    refresh = issue_refresh(str(user.id), str(member.tenant_id))
+    padm = bool(user.is_platform_admin)
+    access = issue_access(str(user.id), str(member.tenant_id), member.role,
+                          platform_admin=padm)
+    refresh = issue_refresh(str(user.id), str(member.tenant_id), platform_admin=padm)
     return {
         "access_token": access,
         "refresh_token": refresh,
@@ -172,12 +186,37 @@ async def refresh(body: RefreshIn):
             TenantMember.tenant_id == claims["tid"]))
         if not member:
             raise HTTPException(403, "membership no longer active")
+        user = await db.get(User, claims["sub"])
+        padm = bool(user and user.is_platform_admin)
 
     return {
-        "access_token": issue_access(claims["sub"], claims["tid"], member.role),
-        "refresh_token": issue_refresh(claims["sub"], claims["tid"]),
+        "access_token": issue_access(claims["sub"], claims["tid"], member.role,
+                                      platform_admin=padm),
+        "refresh_token": issue_refresh(claims["sub"], claims["tid"], platform_admin=padm),
         "token_type": "bearer",
         "expires_in": settings.JWT_ACCESS_TTL_SECONDS,
+    }
+
+
+@router.post("/switch-tenant")
+async def switch_tenant(body: SwitchTenantIn, auth=Depends(get_auth)):
+    """在线切换租户：签发新 access/refresh，不吊销当前 token（便于多标签页）。"""
+    async with db_mod.session_factory() as db:
+        member = await db.scalar(select(TenantMember).where(
+            TenantMember.user_id == auth.user_id,
+            TenantMember.tenant_id == body.tenant_id))
+        if not member:
+            raise HTTPException(403, "not a member of tenant")
+        user = await db.get(User, auth.user_id)
+        padm = bool(user and user.is_platform_admin)
+        role = member.role
+    return {
+        "access_token": issue_access(auth.user_id, body.tenant_id, role,
+                                    platform_admin=padm),
+        "refresh_token": issue_refresh(auth.user_id, body.tenant_id, platform_admin=padm),
+        "token_type": "bearer",
+        "expires_in": settings.JWT_ACCESS_TTL_SECONDS,
+        "tenant_id": body.tenant_id,
     }
 
 

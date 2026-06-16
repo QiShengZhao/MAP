@@ -24,6 +24,7 @@ class AuthContext:
     tenant_id: str
     role: str
     jti: str = ""
+    is_platform_admin: bool = False
 
     @property
     def tenant_role(self) -> str:
@@ -62,7 +63,8 @@ async def get_auth(request: Request,
         raise HTTPException(403, "not a member of this tenant")
 
     ctx = AuthContext(user_id=claims["sub"], tenant_id=claims["tid"],
-                      role=member.role, jti=claims["jti"])
+                      role=member.role, jti=claims["jti"],
+                      is_platform_admin=bool(claims.get("padm")))
     request.state.tenant_id = ctx.tenant_id
     request.state.user_id = ctx.user_id
     return ctx
@@ -85,7 +87,8 @@ async def get_auth_sse(token: str = Query(...), db: AsyncSession = Depends(get_d
     if not member:
         raise HTTPException(403, "not a member of this tenant")
     return AuthContext(user_id=claims["sub"], tenant_id=claims["tid"],
-                       role=member.role, jti=claims["jti"])
+                      role=member.role, jti=claims["jti"],
+                      is_platform_admin=bool(claims.get("padm")))
 
 
 async def get_tenant_db(auth: AuthContext = Depends(get_auth)):

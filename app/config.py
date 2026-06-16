@@ -112,6 +112,12 @@ class Settings(BaseSettings):
     OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
     MAX_AGENT_TURNS: int = 25
     RUN_LOCK_TTL: int = 900
+    PAUSED_RUN_MAX_DAYS: int = 7
+    CHECKPOINT_S3_THRESHOLD_MESSAGES: int = 150
+    CHECKPOINT_INLINE_TAIL_MESSAGES: int = 20
+    FLINK_DEPLOYMENT_TARGET: str = "local"  # local | application
+    FLINK_CHECKPOINT_URI: str = "file:///opt/flink/checkpoints"
+    PLATFORM_ADMIN_EMAILS: str = ""
 
     @field_validator("JWT_KEYS", "CORS_ORIGINS", "TRUSTED_HOSTS", mode="before")
     @classmethod

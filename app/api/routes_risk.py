@@ -118,7 +118,7 @@ class DryRunIn(BaseModel):
 
 
 def auth_is_platform_admin(auth: AuthContext) -> bool:
-    return getattr(auth, "is_platform_admin", False)
+    return auth.is_platform_admin
 
 
 async def _get_rule_or_404(db, rule_id: str, auth: AuthContext) -> RiskRule:

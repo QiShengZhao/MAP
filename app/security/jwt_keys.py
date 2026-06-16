@@ -14,21 +14,29 @@ def _keys() -> dict[str, str]:
     return settings.JWT_KEYS or {settings.JWT_ACTIVE_KID: settings.JWT_SECRET}
 
 
-def _issue(sub: str, tenant_id: str, role: str, typ: str, ttl: int) -> str:
+def _issue(sub: str, tenant_id: str, role: str, typ: str, ttl: int,
+           *, platform_admin: bool = False) -> str:
     now = int(time.time())
+    payload = {
+        "sub": sub, "tid": tenant_id, "role": role, "typ": typ,
+        "iat": now, "exp": now + ttl, "jti": uuid.uuid4().hex,
+    }
+    if platform_admin:
+        payload["padm"] = True
     return jwt.encode(
-        {"sub": sub, "tid": tenant_id, "role": role, "typ": typ,
-         "iat": now, "exp": now + ttl, "jti": uuid.uuid4().hex},
+        payload,
         _keys()[settings.JWT_ACTIVE_KID], algorithm="HS256",
         headers={"kid": settings.JWT_ACTIVE_KID})
 
 
-def issue_access(sub: str, tenant_id: str, role: str) -> str:
-    return _issue(sub, tenant_id, role, "access", settings.JWT_ACCESS_TTL_SECONDS)
+def issue_access(sub: str, tenant_id: str, role: str, *, platform_admin: bool = False) -> str:
+    return _issue(sub, tenant_id, role, "access", settings.JWT_ACCESS_TTL_SECONDS,
+                  platform_admin=platform_admin)
 
 
-def issue_refresh(sub: str, tenant_id: str) -> str:
-    return _issue(sub, tenant_id, "", "refresh", settings.JWT_REFRESH_TTL_SECONDS)
+def issue_refresh(sub: str, tenant_id: str, *, platform_admin: bool = False) -> str:
+    return _issue(sub, tenant_id, "", "refresh", settings.JWT_REFRESH_TTL_SECONDS,
+                    platform_admin=platform_admin)
 
 
 def verify(token: str) -> dict:

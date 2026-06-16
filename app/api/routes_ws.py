@@ -30,7 +30,9 @@ async def authenticate_websocket(token, requested_tenant_id, db):
         raise ValueError("tenant membership inactive")
     return AuthContext(
         user_id=claims["sub"], tenant_id=claims["tid"],
-        role=member.role, jti=claims["jti"])
+        role=member.role, jti=claims["jti"],
+        is_platform_admin=bool(claims.get("padm")),
+    )
 
 
 async def validate_workspace_access(workspace_id, auth, db):

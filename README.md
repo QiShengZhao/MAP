@@ -9,7 +9,7 @@
 [![CI](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml/badge.svg)](https://github.com/QiShengZhao/MAP/actions/workflows/ci.yml)
 [![Kubernetes](https://img.shields.io/badge/K8s-gVisor-326CE5.svg)]()
 [![License](https://img.shields.io/badge/License-MIT-green.svg)]()
-[![Tests](https://img.shields.io/badge/tests-91%20passed-0A9EDC.svg)]()
+[![Tests](https://img.shields.io/badge/tests-99%20passed-0A9EDC.svg)]()
 
 > 模型只做决策 · 动作经 Tools · 高风险审批 · 沙箱执行 · 全程可观测 · 资源可计量
 
@@ -441,6 +441,7 @@ MAP/
 POST /v1/auth/register     注册租户（自动 owner）
 POST /v1/auth/login        登录 → access + refresh（可选 tenant_id 多租户）
 POST /v1/auth/refresh      刷新（rotation：旧 token 立即吊销）
+POST /v1/auth/switch-tenant  切换租户 → 新 access + refresh
 POST /v1/auth/logout       登出（jti 加黑名单）
 ```
 
@@ -631,13 +632,13 @@ pytest --cov=app --cov-report=html     # 覆盖率报告
 - [x] GitHub Actions CI（pytest + RLS 校验 + compose 冒烟 + GHCR 发布）
 - [x] Agent 长期记忆（摘要 + memory_items + 工具 + API）
 - [x] Skill 精选目录与安全 URL 导入
-- [ ] pause/resume 端到端集成测试
-- [ ] 工具幂等缓存（resume 不重放已执行 tool call）
-- [ ] 平台级风控规则（`is_platform_admin`）
-- [ ] Paused Run 超 7 天自动 cancel + 通知
-- [ ] 长会话检查点 `messages` 溢出转存 S3 引用
-- [ ] Flink Application 模式 + S3 checkpoint
-- [ ] 多租户在线切换（token 交换端点）
+- [x] pause/resume 端到端集成测试
+- [x] 工具幂等缓存（resume 不重放已执行 tool call）
+- [x] 平台级风控规则（`is_platform_admin`）
+- [x] Paused Run 超 7 天自动 cancel + 通知
+- [x] 长会话检查点 `messages` 溢出转存 S3 引用
+- [x] Flink Application 模式 + S3 checkpoint
+- [x] 多租户在线切换（token 交换端点）
 
 ---
 
