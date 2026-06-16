@@ -1,4 +1,4 @@
-import asyncio, logging, time
+import asyncio, hashlib, logging, math, time
 from datetime import datetime
 import stripe
 from sqlalchemy import select, func
@@ -9,9 +9,19 @@ from app.domain.models import BillingAccount, UsageRecord, UsageReportCursor
 log = logging.getLogger("billing-reporter")
 stripe.api_key = settings.STRIPE_API_KEY
 
-CONVERT = {"tokens": lambda q: max(1, q // 1000),       # 千 token
-           "sandbox_seconds": lambda q: max(1, q // 60)} # 分钟
+UNIT_SIZE = {"tokens": 1000, "sandbox_seconds": 60}
 KIND_TO_ITEM = {"tokens": "si_tokens", "sandbox_seconds": "si_sandbox"}
+
+
+def billable_quantity(kind, quantity):
+    return math.ceil(quantity / UNIT_SIZE[kind])
+
+
+def usage_batch_key(tenant_id, kind, start, end=None):
+    # The cursor start uniquely identifies a batch and remains stable on retry.
+    raw = f"{tenant_id}:{kind}:{start.isoformat()}".encode()
+    return "usage:" + hashlib.sha256(raw).hexdigest()
+
 
 async def report_tenant(db, acc):
     for kind, item_attr in KIND_TO_ITEM.items():
@@ -31,11 +41,12 @@ async def report_tenant(db, acc):
             UsageRecord.created_at <= watermark))).scalar() or 0
         if total <= 0:
             continue
-        qty = CONVERT[kind](int(total))
+        qty = billable_quantity(kind, int(total))
         stripe.SubscriptionItem.create_usage_record(
             item_id, quantity=qty, action="increment",
             timestamp=int(time.time()),
-            idempotency_key=f"{acc.tenant_id}:{kind}:{watermark.isoformat()}")
+            idempotency_key=usage_batch_key(
+                acc.tenant_id, kind, cursor.last_reported_at, watermark))
         cursor.last_reported_at = watermark
         log.info("reported tenant=%s kind=%s qty=%d", acc.tenant_id, kind, qty)
 

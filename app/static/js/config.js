@@ -142,14 +142,32 @@ const Config = (() => {
     c.innerHTML = '';
     if (isAdmin()) {
       c.appendChild(el('div', {class: 'toolbar'},
-        el('button', {onclick: () => skillForm(null)}, '+ 新建 Skill')));
+        el('button', {onclick: () => skillForm(null)}, '+ 新建 Skill'),
+        el('button', {class: 'ghost', onclick: importSkillFromUrl}, '从网址导入')));
     }
+    const catalogHolder = el('section', {class: 'skill-section'},
+      el('div', {class: 'skill-section-head'},
+        el('div', {},
+          el('h3', {}, '热门 Skill'),
+          el('p', {class: 'dim'}, '来自官方仓库的固定清单，可预览后一键安装。'))),
+      el('div', {class: 'skill-catalog'},
+        el('div', {class: 'skeleton'}),
+        el('div', {class: 'skeleton'})));
     const holder = el('div', {});
+    c.appendChild(catalogHolder);
+    c.appendChild(el('div', {class: 'skill-section-head'},
+      el('div', {}, el('h3', {}, '已安装 Skill'))));
     c.appendChild(holder);
     holder.appendChild(dataTable({columns: [], rows: null}));
     try {
-      const skills = await api('/skills');
+      const [skills, catalog] = await Promise.all([
+        api('/skills'),
+        api('/skills/catalog'),
+      ]);
       const rows = Array.isArray(skills) ? skills : (skills.items || []);
+      const catalogGrid = catalogHolder.querySelector('.skill-catalog');
+      catalogGrid.innerHTML = '';
+      (catalog || []).forEach(item => catalogGrid.appendChild(skillCatalogCard(item)));
       holder.innerHTML = '';
       holder.appendChild(dataTable({
         empty: '暂无 Skill',
@@ -174,6 +192,96 @@ const Config = (() => {
         rows,
       }));
     } catch (e) { holder.innerHTML = ''; toast(e.message, 'error'); }
+  }
+
+  function skillCatalogCard(item) {
+    const install = el('button', {
+      class: 'mini',
+      disabled: item.installed || !isAdmin(),
+      onclick: async () => {
+        install.disabled = true;
+        install.textContent = '安装中...';
+        try {
+          await api('/skills/import', {
+            method: 'POST',
+            body: JSON.stringify({catalog_id: item.id}),
+          });
+          toast(`已安装 ${item.name}`, 'success');
+          renderSkills();
+        } catch (e) {
+          install.disabled = false;
+          install.textContent = '一键安装';
+          toast(e.message, 'error');
+        }
+      },
+    }, item.installed ? '已安装' : (isAdmin() ? '一键安装' : '仅管理员可安装'));
+    return el('article', {class: 'skill-catalog-card'},
+      el('div', {class: 'skill-card-top'},
+        el('span', {class: 'badge'}, item.publisher),
+        el('span', {class: 'dim'}, item.category)),
+      el('h4', {}, item.name),
+      el('p', {}, item.description),
+      el('div', {class: 'skill-card-actions'},
+        el('a', {
+          href: item.homepage,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        }, '查看来源'),
+        el('button', {
+          class: 'mini ghost',
+          onclick: () => previewImportedSkill({catalog_id: item.id}),
+        }, '预览'),
+        install));
+  }
+
+  function importSkillFromUrl() {
+    const url = el('input', {
+      type: 'url',
+      placeholder: 'https://example.com/path/SKILL.md',
+    });
+    const errBox = el('div', {class: 'err-text'});
+    openModal('从网址导入 Skill', el('div', {class: 'form'},
+      field('SKILL.md 地址', url),
+      el('p', {class: 'dim'}, '仅支持 HTTPS；服务器会阻止内网地址、重定向和超过 256 KiB 的文件。'),
+      errBox), [
+      el('button', {class: 'ghost', onclick: closeModal}, '取消'),
+      el('button', {onclick: async () => {
+        const value = url.value.trim();
+        if (!value) {
+          errBox.textContent = '请输入 SKILL.md 地址';
+          return;
+        }
+        closeModal();
+        await previewImportedSkill({url: value});
+      }}, '读取并预览'),
+    ]);
+  }
+
+  async function previewImportedSkill(source) {
+    try {
+      const skill = await api('/skills/import/preview', {
+        method: 'POST',
+        body: JSON.stringify(source),
+      });
+      const errBox = el('div', {class: 'err-text'});
+      openModal(`预览 Skill：${skill.name}`, el('div', {class: 'form'},
+        el('p', {}, skill.description || '无描述'),
+        el('pre', {class: 'skill-preview'}, skill.instructions),
+        errBox), [
+        el('button', {class: 'ghost', onclick: closeModal}, '关闭'),
+        ...(isAdmin() ? [el('button', {onclick: async () => {
+          try {
+            await api('/skills/import', {
+              method: 'POST',
+              body: JSON.stringify(source),
+            });
+            closeModal();
+            toast(`已安装 ${skill.name}`, 'success');
+            renderSkills();
+          } catch (e) { errBox.textContent = e.message; }
+        }}, '安装')] : []),
+      ]);
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   function skillForm(s) {

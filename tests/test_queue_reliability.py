@@ -7,6 +7,7 @@ from app.domain.models import Run, RunStatus
 from app.execution import worker
 from app.scheduling import queue as queue_mod
 from app.scheduling import scheduler
+from app.scheduling.lock import DistributedLock
 
 
 async def test_enqueue_is_idempotent(redis, monkeypatch):
@@ -20,6 +21,18 @@ async def test_enqueue_is_idempotent(redis, monkeypatch):
     entries = await redis.xrange(queue_mod.STREAM)
     assert len(entries) == 1
     assert json.loads(entries[0][1]["data"])["run_id"] == "r1"
+
+
+async def test_lock_extend_does_not_refresh_replaced_owner(redis, monkeypatch):
+    from app.scheduling import lock as lock_mod
+
+    monkeypatch.setattr(lock_mod, "redis_client", redis)
+    lock = DistributedLock("run-1", ttl=30)
+    assert await lock.acquire()
+    await redis.set(lock.key, "new-owner", ex=5)
+
+    assert await lock.extend() is False
+    assert await redis.ttl(lock.key) <= 5
 
 
 async def test_recover_unqueued_runs_dispatches_missing_marker(

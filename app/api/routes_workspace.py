@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from app.infra.db import get_db
 from app.api.deps import get_auth, require_admin, check_workspace
-from app.domain.models import Workspace, WorkspaceMember, TenantMember
+from app.domain.models import Session, Workspace, WorkspaceMember, TenantMember
 from app.platform_services.seats import SeatService, SeatLimitExceeded
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
@@ -29,6 +29,18 @@ async def list_workspaces(auth=Depends(get_auth), db=Depends(get_db)):
         .where(Workspace.tenant_id == auth.tenant_id,
                WorkspaceMember.user_id == auth.user_id))).scalars().all()
     return [{"id": w.id, "name": w.name} for w in rows]
+
+
+@router.get("/{workspace_id}/sessions")
+async def list_workspace_sessions(workspace_id: str, auth=Depends(get_auth),
+                                  db=Depends(get_db)):
+    await check_workspace(workspace_id, auth, db)
+    rows = (await db.execute(select(Session)
+        .where(Session.tenant_id == auth.tenant_id,
+               Session.workspace_id == workspace_id)
+        .order_by(Session.created_at.desc()))).scalars().all()
+    return [{"id": s.id, "title": s.title, "created_at": s.created_at}
+            for s in rows]
 
 class AddMemberReq(BaseModel):
     user_id: str

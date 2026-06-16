@@ -1,7 +1,7 @@
 """风控规则 CRUD + dry-run + 事件查询 + 租户暂停管理 + Run 级暂停/恢复。"""
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -17,6 +17,10 @@ from app.risk.expression import ExpressionError, compile_expr, evaluate_compiled
 log = logging.getLogger("api.risk")
 router = APIRouter(prefix="/v1/risk", tags=["risk"])
 admin = Depends(require_role("owner", "admin"))
+
+
+def utcnow_naive() -> datetime:
+    return datetime.utcnow()
 
 
 class RuleIn(BaseModel):
@@ -189,7 +193,7 @@ async def update_rule(rule_id: str, body: RuleIn,
     rule.cooldown_seconds = body.cooldown_seconds
     rule.severity = body.severity
     rule.enabled = body.enabled
-    rule.updated_at = datetime.now(timezone.utc)
+    rule.updated_at = utcnow_naive()
     rule.updated_by = auth.user_id
     await db.commit()
     await db.refresh(rule)
@@ -202,7 +206,7 @@ async def toggle_rule(rule_id: str, enabled: bool,
                       auth: AuthContext = admin, db=Depends(get_db)):
     rule = await _get_rule_or_404(db, rule_id, auth)
     rule.enabled = enabled
-    rule.updated_at = datetime.now(timezone.utc)
+    rule.updated_at = utcnow_naive()
     await db.commit()
     await db.refresh(rule)
     await RiskEngine.publish_reload()

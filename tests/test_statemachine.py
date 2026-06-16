@@ -2,7 +2,8 @@ import pytest
 
 from app.domain.models import Run, RunStatus
 from app.execution.run_statemachine import (ALLOWED, InvalidTransition,
-                                            StaleTransition, transition)
+                                            StaleTransition, transition,
+                                            utcnow_naive)
 
 
 async def _mk_run(db, status="running"):
@@ -43,3 +44,7 @@ async def test_cas_detects_concurrent_change(db_session):
 def test_every_status_has_transition_entry():
     assert set(ALLOWED) == {"queued", "running", "awaiting_approval",
                             "paused", "completed", "failed", "cancelled"}
+
+
+def test_transition_timestamps_match_model_timezone():
+    assert utcnow_naive().tzinfo is None

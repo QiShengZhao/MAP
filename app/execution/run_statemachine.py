@@ -1,6 +1,6 @@
 """Run 状态机：唯一合法变更入口（CAS 乐观锁）。"""
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,10 @@ class StaleTransition(Exception):
     """乐观锁失败：状态已被并发方改走。"""
 
 
+def utcnow_naive() -> datetime:
+    return datetime.utcnow()
+
+
 def _status(s: str | RunStatus) -> RunStatus:
     return s if isinstance(s, RunStatus) else RunStatus(s)
 
@@ -43,14 +47,14 @@ async def transition(db: AsyncSession, run_id: str, from_status: str,
     values: dict = {
         "status": _status(to_status),
         "status_reason": reason or "",
-        "updated_at": datetime.now(timezone.utc),
+        "updated_at": utcnow_naive(),
     }
     if to_status == "running":
-        values["started_at"] = datetime.now(timezone.utc)
+        values["started_at"] = utcnow_naive()
     if to_status in TERMINAL:
-        values["finished_at"] = datetime.now(timezone.utc)
+        values["finished_at"] = utcnow_naive()
     if to_status == "paused":
-        values["paused_at"] = datetime.now(timezone.utc)
+        values["paused_at"] = utcnow_naive()
     if extra:
         values.update(extra)
 

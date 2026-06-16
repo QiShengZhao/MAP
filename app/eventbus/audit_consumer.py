@@ -2,7 +2,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from aiokafka import AIOKafkaConsumer
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -78,7 +78,7 @@ async def _flush(events: list[dict]) -> None:
             "seq": ev["seq"],
             "type": ev["event_type"],
             "payload": payload,
-            "created_at": datetime.fromtimestamp(ev["ts_ms"] / 1000, tz=timezone.utc),
+            "created_at": datetime.utcfromtimestamp(ev["ts_ms"] / 1000),
         })
 
     async with SessionLocal() as db:

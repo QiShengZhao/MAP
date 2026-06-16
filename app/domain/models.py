@@ -1,7 +1,7 @@
 import uuid, enum
 from datetime import datetime
 from sqlalchemy import (String, ForeignKey, JSON, Enum, Index, Integer,
-                        DateTime, UniqueConstraint, Text, BigInteger)
+                        DateTime, UniqueConstraint, Text, BigInteger, Float)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 def uid(): return str(uuid.uuid4())
@@ -199,6 +199,40 @@ class RunState(Base):
     state: Mapped[dict] = mapped_column(JSON, default=dict)
     version: Mapped[int] = mapped_column(Integer, default=0)
     pending_tool_call: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+class SessionSummary(Base):
+    __tablename__ = "session_summaries"
+    session_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(36), index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    last_message_id: Mapped[str] = mapped_column(String(36), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+class MemoryItem(Base):
+    __tablename__ = "memory_items"
+    __table_args__ = (
+        Index("ix_memory_scope", "tenant_id", "scope", "workspace_id", "user_id"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    tenant_id: Mapped[str] = mapped_column(String(36), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    scope: Mapped[str] = mapped_column(String(16), default="workspace")
+    kind: Mapped[str] = mapped_column(String(32), default="note")
+    title: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    source_type: Mapped[str] = mapped_column(String(32), default="system")
+    source_id: Mapped[str] = mapped_column(String(64), default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.6)
+    pinned: Mapped[bool] = mapped_column(default=False)
+    embedding: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 class SandboxSession(Base):

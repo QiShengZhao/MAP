@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Callable, Awaitable
 from app.runtime.sandbox import SandboxManager
 from app.platform_services.artifact_service import ArtifactService
+from app.memory.service import MemoryService
 
 @dataclass
 class ToolContext:
@@ -12,6 +13,8 @@ class ToolContext:
     db: object
     emit: Callable[..., Awaitable]
     usage: object
+    workspace_id: str = ""
+    user_id: str = ""
 
 class ToolDef:
     def __init__(self, name, schema, handler, high_risk=False):
@@ -108,6 +111,89 @@ async def save_artifact(ctx, path, name, mime_type="application/octet-stream"):
                    {"artifact_id": artifact.id, "name": name,
                     "size": len(data)})
     return {"ok": True, "artifact_id": artifact.id, "size": len(data)}
+
+@ToolRegistry.register("memory_search",
+    "Search shared long-term memory visible to this workspace/session.",
+    {"type": "object", "properties": {
+        "query": {"type": "string"},
+        "scope": {"type": "string", "enum": ["user", "workspace", "session", "run"]},
+        "limit": {"type": "integer", "default": 8}},
+     "required": ["query"]})
+async def memory_search(ctx, query, scope=None, limit=8):
+    rows = await MemoryService.search(
+        ctx.db,
+        tenant_id=ctx.tenant_id,
+        workspace_id=ctx.workspace_id or None,
+        session_id=ctx.session_id,
+        run_id=ctx.run_id,
+        user_id=ctx.user_id or None,
+        query=query,
+        scope=scope,
+        limit=limit,
+    )
+    return [{"id": r.id, "scope": r.scope, "kind": r.kind,
+             "title": r.title, "content": r.content,
+             "confidence": r.confidence} for r in rows]
+
+@ToolRegistry.register("memory_write",
+    "Write durable memory for future agent runs.",
+    {"type": "object", "properties": {
+        "scope": {"type": "string", "enum": ["user", "workspace", "session", "run"]},
+        "kind": {"type": "string", "enum": ["fact", "preference", "decision", "task", "summary", "note"]},
+        "title": {"type": "string"},
+        "content": {"type": "string"},
+        "confidence": {"type": "number", "default": 0.6}},
+     "required": ["scope", "kind", "title", "content"]})
+async def memory_write(ctx, scope, kind, title, content, confidence=0.6):
+    item = await MemoryService.write(
+        ctx.db,
+        tenant_id=ctx.tenant_id,
+        workspace_id=ctx.workspace_id or None,
+        session_id=ctx.session_id if scope in ("session", "run") else None,
+        run_id=ctx.run_id if scope == "run" else None,
+        user_id=ctx.user_id or None,
+        scope=scope,
+        kind=kind,
+        title=title,
+        content=content,
+        source_type="tool",
+        source_id=ctx.run_id,
+        confidence=confidence,
+    )
+    await ctx.db.flush()
+    return {"ok": True, "id": item.id, "title": item.title}
+
+@ToolRegistry.register("memory_update",
+    "Update a visible memory item by id.",
+    {"type": "object", "properties": {
+        "memory_id": {"type": "string"},
+        "title": {"type": "string"},
+        "content": {"type": "string"},
+        "confidence": {"type": "number"},
+        "pinned": {"type": "boolean"}},
+     "required": ["memory_id"]})
+async def memory_update(ctx, memory_id, title=None, content=None,
+                        confidence=None, pinned=None):
+    item = await MemoryService.get_visible(
+        ctx.db, tenant_id=ctx.tenant_id, memory_id=memory_id,
+        workspace_id=ctx.workspace_id or None, session_id=ctx.session_id,
+        run_id=ctx.run_id, user_id=ctx.user_id or None)
+    if not item:
+        return {"ok": False, "error": "memory not found"}
+    await MemoryService.update(ctx.db, item, title=title, content=content,
+                               confidence=confidence, pinned=pinned)
+    return {"ok": True, "id": item.id, "title": item.title}
+
+@ToolRegistry.register("memory_forget",
+    "Soft-delete a visible memory item by id.",
+    {"type": "object", "properties": {"memory_id": {"type": "string"}},
+     "required": ["memory_id"]})
+async def memory_forget(ctx, memory_id):
+    ok = await MemoryService.forget(
+        ctx.db, tenant_id=ctx.tenant_id, memory_id=memory_id,
+        workspace_id=ctx.workspace_id or None, session_id=ctx.session_id,
+        run_id=ctx.run_id, user_id=ctx.user_id or None)
+    return {"ok": ok}
 
 @ToolRegistry.register("web_fetch",
     "Fetch a URL via sandbox and return text content.",

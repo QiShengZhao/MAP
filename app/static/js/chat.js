@@ -1,9 +1,14 @@
 /* === 对话页：会话 / SSE / Run 控制 / 审批 / 侧栏 === */
 const Chat = (() => {
   let asstEl = null, curApproval = null, sidePoll = null;
+  let followLatest = true;
 
   function init() {
     $('input').addEventListener('keydown', e => { if (e.ctrlKey && e.key === 'Enter') send(); });
+    $('msgs').addEventListener('scroll', () => {
+      const box = $('msgs');
+      followLatest = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    }, {passive: true});
     loadSessions();
     pollSide();
     if (sidePoll) clearInterval(sidePoll);
@@ -15,7 +20,7 @@ const Chat = (() => {
     if (S.workspaceId) localStorage.setItem('workspaceId', S.workspaceId);
     S.curSession = null;
     S.curRun = null;
-    $('msgs').innerHTML = '';
+    resetMessages();
     setRunStatus('idle');
     loadSessions();
   }
@@ -53,14 +58,14 @@ const Chat = (() => {
   async function newSession() {
     S.curSession = null;
     S.curRun = null;
-    $('msgs').innerHTML = '';
+    resetMessages();
     setRunStatus('idle');
     await loadSessions();
   }
 
   async function openSession(id) {
     S.curSession = id;
-    $('msgs').innerHTML = '';
+    resetMessages();
     try {
       const msgs = await api(`/sessions/${id}/messages`);
       msgs.forEach(m => addMsg(m.role, msgText(m.content)));
@@ -255,18 +260,21 @@ const Chat = (() => {
   }
 
   function addMsg(role, text) {
+    $('msgs').classList.add('has-content');
     const d = el('div', {class: 'msg ' + role}, text);
     $('msgs').appendChild(d);
-    scroll_();
+    scroll_(role === 'user');
     return d;
   }
 
   function addEvent(t) {
+    $('msgs').classList.add('has-content');
     $('msgs').appendChild(el('div', {class: 'msg event'}, t));
     scroll_();
   }
 
   function addTool(p) {
+    $('msgs').classList.add('has-content');
     const d = el('div', {class: 'tool', 'data-cid': p.id},
       el('div', {class: 'hd', onclick: e => e.currentTarget.parentNode.classList.toggle('open')},
         `🔧 ${p.name} `, el('span', {class: 'st'}, '⏳')),
@@ -284,7 +292,20 @@ const Chat = (() => {
     d.querySelector('pre').textContent += `\n── result ──\n${(p.output || '').slice(0, 2000)}`;
   }
 
-  function scroll_() { $('msgs').scrollTop = $('msgs').scrollHeight; }
+  function scroll_(force = false) {
+    if (!force && !followLatest) return;
+    const box = $('msgs');
+    box.scrollTop = box.scrollHeight;
+    followLatest = true;
+  }
+
+  function resetMessages() {
+    const empty = document.querySelector('.chat-empty');
+    $('msgs').innerHTML = '';
+    $('msgs').classList.remove('has-content');
+    followLatest = true;
+    if (empty) $('msgs').appendChild(empty);
+  }
 
   async function pollSide() {
     if (S.currentView !== 'chat') return;

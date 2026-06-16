@@ -17,27 +17,45 @@ async def session_factory():
     async with SessionLocal() as session:
         if session.bind and session.bind.dialect.name == "postgresql":
             await session.execute(
-                text("SELECT set_config('app.is_service', 'true', true)"))
-        yield session
+                text("SELECT set_config('app.is_service', 'true', false)"))
+        try:
+            yield session
+        finally:
+            await reset_context(session)
 
 
 async def get_db():
     async with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await reset_context(session)
 
 @asynccontextmanager
 async def tenant_session(tenant_id: str):
     """带 RLS 上下文的会话：DB 层兜底租户隔离"""
     async with SessionLocal() as session:
         await set_tenant_context(session, tenant_id)
-        yield session
+        try:
+            yield session
+        finally:
+            await reset_context(session)
 
 
 async def set_tenant_context(session: AsyncSession, tenant_id: str) -> None:
     if session.bind and session.bind.dialect.name == "postgresql":
         await session.execute(
-            text("SELECT set_config('app.tenant_id', :tid, true)"),
+            text("SELECT set_config('app.tenant_id', :tid, false)"),
             {"tid": tenant_id})
+
+
+async def reset_context(session: AsyncSession) -> None:
+    if session.bind and session.bind.dialect.name == "postgresql":
+        try:
+            await session.execute(text("RESET app.tenant_id"))
+            await session.execute(text("RESET app.is_service"))
+        except Exception:
+            pass
 
 RLS_SQL = """
 DO $$
